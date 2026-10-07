@@ -139,6 +139,16 @@ impl Config {
     }
 }
 
+/// US equity sessions as Pyth Pro's `marketSession` reports them; each indexes
+/// a collateral's bands.
+pub mod session {
+    pub const REGULAR: u8 = 0;
+    pub const PRE: u8 = 1;
+    pub const POST: u8 = 2;
+    pub const OVERNIGHT: u8 = 3;
+    pub const CLOSED: u8 = 4;
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct Reserve {

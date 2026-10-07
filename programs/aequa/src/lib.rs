@@ -8,6 +8,7 @@ pub mod errors;
 pub mod instructions;
 pub mod math;
 pub mod params;
+pub mod pyth;
 pub mod state;
 
 use instructions::*;

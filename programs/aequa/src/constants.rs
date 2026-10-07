@@ -7,6 +7,8 @@ pub const DAY: i64 = 86_400;
 
 /// USDq, sUSDq and USDC carry 6 decimals; dollar values inside the program use the same unit.
 pub const USD_DECIMALS: u8 = 6;
+/// Prices are carried at 8 decimals (Pyth's equity exponent).
+pub const PRICE_DECIMALS: u32 = 8;
 
 pub mod seeds {
     pub const CONFIG: &[u8] = b"config";
