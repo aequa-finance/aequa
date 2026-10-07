@@ -52,4 +52,14 @@ pub mod aequa {
     pub fn unpause(ctx: Context<AdminOnly>, paths: u32) -> Result<()> {
         ctx.accounts.unpause(paths)
     }
+
+    // USDC paths
+
+    pub fn mint_with_usdc(ctx: Context<MintWithUsdc>, amount: u64, min_out: u64) -> Result<()> {
+        ctx.accounts.run(amount, min_out)
+    }
+
+    pub fn redeem_for_usdc(ctx: Context<RedeemForUsdc>, amount: u64, min_out: u64) -> Result<()> {
+        ctx.accounts.run(amount, min_out)
+    }
 }
