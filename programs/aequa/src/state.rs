@@ -4,8 +4,8 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::HOUR;
 use crate::errors::AequaError;
+use crate::math;
 
 /// The paths the guardian can stop, as bits of `Config::paused`.
 pub mod path {
@@ -74,9 +74,7 @@ impl Bucket {
     }
 
     pub fn level(&self, cap: u64, now: i64) -> u64 {
-        let elapsed = now.saturating_sub(self.updated_at).max(0) as u128;
-        let level = self.available as u128 + (cap as u128) * elapsed / HOUR as u128;
-        level.min(cap as u128) as u64
+        math::bucket_level(self.available, self.updated_at, cap, now)
     }
 
     /// Takes `amount` from the bucket or fails with `CapacityExceeded`.
