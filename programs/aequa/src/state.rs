@@ -30,7 +30,7 @@ pub mod path {
     pub const ALL: u32 = (1 << 14) - 1;
 }
 
-/// Every parameter governance can set.
+/// Every parameter governance can set, each inside its range in `params.rs`.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub struct Params {
     /// Short leverage: band low, target, band high, as leverage × 10,000 (2x, 3x, 4x).
@@ -84,6 +84,12 @@ impl Bucket {
         self.available = level - amount;
         self.updated_at = now;
         Ok(())
+    }
+
+    /// Keeps the bucket's level when its cap changes.
+    pub fn settle(&mut self, cap: u64, now: i64) {
+        self.available = self.level(cap, now);
+        self.updated_at = now;
     }
 }
 
