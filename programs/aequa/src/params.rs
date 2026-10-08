@@ -22,6 +22,8 @@ pub fn check_cap_change(old: u64, new: u64, launch: u64) -> Result<()> {
 
 /// Launch values.
 pub const LAUNCH_USDC_HOURLY_CAP: u64 = 1_000_000_000_000; // $1,000,000
+pub const LAUNCH_XSTOCK_HOURLY_CAP: u64 = 500_000_000_000; // $500,000
+pub const LAUNCH_SPOT_CAP: u64 = 15_000_000_000_000; // $15,000,000
 
 impl Params {
     /// The launch values.
@@ -44,6 +46,8 @@ impl Params {
             protocol_share_bps: 1_000,
             reserve_fund_target_bps: 200,
             susdq_cooldown_secs: 7 * DAY as u32,
+            ca_window_before_secs: 24 * HOUR as u32,
+            ca_window_after_secs: HOUR as u32,
         }
     }
 
@@ -80,6 +84,8 @@ impl Params {
         within(self.protocol_share_bps, 500, 2_000)?;
         within(self.reserve_fund_target_bps, 100, 500)?;
         within(self.susdq_cooldown_secs as i64, 3 * DAY, 14 * DAY)?;
+        within(self.ca_window_before_secs as i64, 0, 72 * HOUR)?;
+        within(self.ca_window_after_secs as i64, 0, 24 * HOUR)?;
 
         match old {
             Some(old) => check_cap_change(old.usdc_hourly_cap, self.usdc_hourly_cap, LAUNCH_USDC_HOURLY_CAP)?,
@@ -87,6 +93,14 @@ impl Params {
         }
         Ok(())
     }
+}
+
+/// A collateral's session bands: each 1–100 bps.
+pub fn check_bands(bands: &[u16; 4]) -> Result<()> {
+    for b in bands {
+        within(*b, 1, 100)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -97,6 +111,7 @@ mod tests {
     fn launch_values_pass() {
         let p = Params::launch();
         p.validate(None).unwrap();
+        assert_eq!(p.spot_share_bps(), 6_750);
     }
 
     #[test]

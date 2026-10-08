@@ -4,6 +4,7 @@
 
 use anchor_lang::prelude::*;
 
+use crate::constants::MAX_COLLATERALS;
 use crate::errors::AequaError;
 use crate::math;
 
@@ -59,6 +60,18 @@ pub struct Params {
     pub protocol_share_bps: u16,
     pub reserve_fund_target_bps: u16,
     pub susdq_cooldown_secs: u32,
+    /// The corporate-action window around a scheduled multiplier change.
+    pub ca_window_before_secs: u32,
+    pub ca_window_after_secs: u32,
+}
+
+impl Params {
+    /// The spot share of supply the targets give: `(1 − buffer) × L / (L + 1)`.
+    pub fn spot_share_bps(&self) -> u64 {
+        let l = self.leverage_bps[1] as u64;
+        let b = self.buffer_bps[1] as u64;
+        (10_000 - b) * l / (l + 10_000)
+    }
 }
 
 /// An hourly token bucket: `available = min(cap, available + cap × elapsed / 3600)`.
@@ -108,6 +121,10 @@ pub struct Config {
     pub paused: u32,
     pub params: Params,
     pub usdc_bucket: Bucket,
+    /// Σ spot_cap over the listed collateral; the USDq ceiling is this over the spot share.
+    pub spot_cap_total: u64,
+    pub collateral_count: u8,
+    pub collaterals: [Pubkey; MAX_COLLATERALS],
     pub bumps: Bumps,
     pub _reserved: [u8; 128],
 }
@@ -133,6 +150,15 @@ impl Config {
         Ok(())
     }
 
+    /// The USDq supply ceiling: `Σ spot_cap / spot share`.
+    pub fn supply_cap(&self) -> u64 {
+        let share = self.params.spot_share_bps();
+        if share == 0 {
+            return 0;
+        }
+        ((self.spot_cap_total as u128) * 10_000 / share as u128).min(u64::MAX as u128) as u64
+    }
+
     /// The Reserve Fund's target for a supply.
     pub fn reserve_fund_target(&self, supply: u64) -> u64 {
         ((supply as u128) * self.params.reserve_fund_target_bps as u128 / 10_000) as u64
@@ -147,6 +173,36 @@ pub mod session {
     pub const POST: u8 = 2;
     pub const OVERNIGHT: u8 = 3;
     pub const CLOSED: u8 = 4;
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Collateral {
+    pub mint: Pubkey,
+    pub vault: Pubkey,
+    pub token_program: Pubkey,
+    pub decimals: u8,
+    /// Position in `Config::collaterals` and in the hedge report's arrays.
+    pub index: u8,
+    /// Stopped by the guardian; the USDC paths keep running.
+    pub paused: bool,
+    /// The ETF's Pyth Pro feed (SPY 1398, QQQ 1363). One feed spans every session; each
+    /// update names its session.
+    pub feed: u32,
+    /// Band per session: regular, pre-market, post-market, overnight, in bps (5 / 15 / 15 / 25).
+    pub bands_bps: [u16; 4],
+    /// Spot value cap, in dollars at 6 decimals.
+    pub spot_cap: u64,
+    /// Capacity per hour for each xStock path, in dollars at 6 decimals.
+    pub hourly_cap: u64,
+    pub mint_bucket: Bucket,
+    pub redeem_bucket: Bucket,
+    /// The hedge market, e.g. "xyz:SP500", and its HyperCore asset id.
+    pub perp: [u8; 24],
+    pub perp_asset: u32,
+    pub bump: u8,
+    pub vault_bump: u8,
+    pub _reserved: [u8; 64],
 }
 
 #[account]

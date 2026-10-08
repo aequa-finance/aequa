@@ -14,12 +14,24 @@ pub enum AequaError {
     // Capacity
     #[msg("This hour's capacity on this path was used in the meantime")]
     CapacityExceeded,
+    #[msg("That would take USDq past its supply ceiling")]
+    SupplyCapExceeded,
+    #[msg("That would take this collateral past its spot cap")]
+    SpotCapExceeded,
     #[msg("The buffer holds less than that right now")]
     BufferInsufficient,
+    #[msg("The vault holds less of this collateral than that")]
+    VaultInsufficient,
 
     // Collateral state
     #[msg("No fresh price for this collateral: the session is closed")]
     CollateralNotLive,
+    #[msg("This collateral is inside a corporate-action window")]
+    CorporateActionWindow,
+    #[msg("The issuer has paused this collateral's mint")]
+    IssuerPaused,
+    #[msg("The collateral mint fails an admission check")]
+    CollateralNotAdmissible,
     #[msg("The signed price is older than the freshness limit")]
     StalePrice,
 
@@ -38,6 +50,10 @@ pub enum AequaError {
     Paused,
     #[msg("A parameter is outside its hard-coded range")]
     ParamOutOfRange,
+    #[msg("The collateral list is full")]
+    TooManyCollaterals,
+    #[msg("The collateral accounts don't match the listing")]
+    CollateralMismatch,
     #[msg("Arithmetic overflow")]
     MathOverflow,
 }

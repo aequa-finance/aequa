@@ -10,6 +10,7 @@ pub mod math;
 pub mod params;
 pub mod pyth;
 pub mod state;
+pub mod token2022;
 
 use instructions::*;
 use state::Params;
@@ -28,6 +29,14 @@ pub mod aequa {
 
     pub fn create_vaults(ctx: Context<CreateVaults>) -> Result<()> {
         ctx.accounts.run(&ctx.bumps)
+    }
+
+    pub fn add_collateral(ctx: Context<AddCollateral>, args: ListingArgs) -> Result<()> {
+        ctx.accounts.run(args, &ctx.bumps)
+    }
+
+    pub fn set_collateral(ctx: Context<SetCollateral>, args: ListingArgs) -> Result<()> {
+        ctx.accounts.run(args)
     }
 
     pub fn set_params(ctx: Context<AdminOnly>, params: Params) -> Result<()> {
@@ -54,6 +63,10 @@ pub mod aequa {
         ctx.accounts.unpause(paths)
     }
 
+    pub fn unpause_collateral(ctx: Context<UnpauseCollateral>) -> Result<()> {
+        ctx.accounts.run()
+    }
+
     // USDC paths
 
     pub fn mint_with_usdc(ctx: Context<MintWithUsdc>, amount: u64, min_out: u64) -> Result<()> {
@@ -62,5 +75,16 @@ pub mod aequa {
 
     pub fn redeem_for_usdc(ctx: Context<RedeemForUsdc>, amount: u64, min_out: u64) -> Result<()> {
         ctx.accounts.run(amount, min_out)
+    }
+
+    // xStock paths. The signed Pyth Pro update is the first argument, so it sits at a fixed
+    // offset (12) the ed25519 instruction points at.
+
+    pub fn mint_with_collateral(ctx: Context<MintWithCollateral>, message: Vec<u8>, ed25519_index: u16, amount: u64, min_out: u64) -> Result<()> {
+        ctx.accounts.run(&message, ed25519_index, amount, min_out)
+    }
+
+    pub fn redeem_for_collateral(ctx: Context<RedeemForCollateral>, message: Vec<u8>, ed25519_index: u16, amount: u64, min_out: u64) -> Result<()> {
+        ctx.accounts.run(&message, ed25519_index, amount, min_out)
     }
 }

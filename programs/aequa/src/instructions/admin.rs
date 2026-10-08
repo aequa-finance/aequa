@@ -6,7 +6,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::seeds::*;
 use crate::errors::AequaError;
-use crate::state::{path, Bucket, Bumps, Config, Params, Reserve, UsdqVault};
+use crate::state::{path, Bucket, Bumps, Collateral, Config, Params, Reserve, UsdqVault};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct InitializeArgs {
@@ -37,7 +37,7 @@ pub struct Initialize<'info> {
     pub usdq_mint: Box<Account<'info, Mint>>,
     #[account(init, payer = payer, seeds = [SUSDQ_MINT], bump, mint::decimals = 6, mint::authority = usdq_vault, mint::token_program = token_program)]
     pub susdq_mint: Box<Account<'info, Mint>>,
-    #[account(mint::token_program = token_program)]
+    #[account(mint::token_program = token_program, constraint = usdc_mint.decimals == 6 @ AequaError::CollateralMismatch)]
     pub usdc_mint: Box<Account<'info, Mint>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
@@ -173,11 +173,32 @@ pub struct Pause<'info> {
     pub config: Box<Account<'info, Config>>,
     #[account(constraint = signer.key() == config.guardian || signer.key() == config.admin @ AequaError::Unauthorized)]
     pub signer: Signer<'info>,
+    #[account(mut, seeds = [COLLATERAL, collateral.mint.as_ref()], bump = collateral.bump)]
+    pub collateral: Option<Box<Account<'info, Collateral>>>,
 }
 
 impl Pause<'_> {
     pub fn run(&mut self, paths: u32) -> Result<()> {
         self.config.paused |= paths & path::ALL;
+        if let Some(c) = self.collateral.as_mut() {
+            c.paused = true;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct UnpauseCollateral<'info> {
+    #[account(seeds = [CONFIG], bump = config.bumps.config, has_one = admin @ AequaError::Unauthorized)]
+    pub config: Box<Account<'info, Config>>,
+    pub admin: Signer<'info>,
+    #[account(mut, seeds = [COLLATERAL, collateral.mint.as_ref()], bump = collateral.bump)]
+    pub collateral: Box<Account<'info, Collateral>>,
+}
+
+impl UnpauseCollateral<'_> {
+    pub fn run(&mut self) -> Result<()> {
+        self.collateral.paused = false;
         Ok(())
     }
 }

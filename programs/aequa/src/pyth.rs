@@ -1,8 +1,8 @@
 //! Pyth Pro prices. A signed update travels in the instruction's first argument; an
 //! ed25519 instruction earlier in the transaction checks its signature over those bytes, and
 //! the Lazer program's `verify_message` confirms the signer is trusted. The program then reads
-//! the payload itself: the timestamp, the channel, each feed's price, exponent and session.
-//! The Lazer program checks none of those.
+//! the payload itself: the timestamp, the channel, each feed's price, exponent, session and
+//! own update time. The Lazer program checks none of those.
 //!
 //! Layouts: pyth-network/pyth-lazer-public, contracts/solana (signature.rs, lib.rs) and
 //! sdk/rust/protocol (message.rs, payload.rs), protocol v0.46.0.
@@ -34,6 +34,7 @@ pub const MAX_CHANNEL: u8 = 3;
 const PROP_PRICE: u8 = 0;
 const PROP_EXPONENT: u8 = 4;
 const PROP_MARKET_SESSION: u8 = 9;
+const PROP_FEED_UPDATE_TIMESTAMP: u8 = 12;
 
 /// The accounts a Pyth Pro verification needs, as they appear in an instruction's context.
 pub struct PythAccounts<'a, 'info> {
@@ -52,6 +53,8 @@ pub struct FeedUpdate {
     pub price: i64,
     pub exponent: i16,
     pub session: i16,
+    /// When the feed's own price last changed, in microseconds; zero when absent.
+    pub updated_us: u64,
     pub has_price: bool,
     pub has_exponent: bool,
     pub has_session: bool,
@@ -184,12 +187,15 @@ pub fn parse(message: &[u8]) -> Result<Update> {
                         r.i64()?;
                     }
                 }
-                7 | 8 | 12 => {
+                7 | 8 => {
                     r.opt_u64()?;
                 }
                 PROP_MARKET_SESSION => {
                     f.session = r.i16()?;
                     f.has_session = true;
+                }
+                PROP_FEED_UPDATE_TIMESTAMP => {
+                    f.updated_us = r.opt_u64()?.unwrap_or(0);
                 }
                 _ => return err!(AequaError::InvalidPythMessage),
             }
@@ -209,12 +215,15 @@ impl Update {
         Ok(())
     }
 
-    /// A feed's price in an open session: a session other than closed. `CollateralNotLive`
-    /// otherwise.
-    pub fn price(&self, feed: u32) -> Result<Price> {
+    /// A feed's price in an open session: a fresh price of its own (not one carried forward
+    /// from an earlier session) and a session other than closed. `CollateralNotLive` otherwise.
+    pub fn price(&self, feed: u32, freshness_secs: u32) -> Result<Price> {
         let f = self.feeds.iter().find(|f| f.id == feed).ok_or(AequaError::CollateralNotLive)?;
         require!(f.has_price && f.has_exponent && f.has_session, AequaError::InvalidPythPrice);
         require!(f.session >= session::REGULAR as i16 && f.session < session::CLOSED as i16, AequaError::CollateralNotLive);
+        require!(f.updated_us > 0, AequaError::InvalidPythPrice);
+        let carried = self.timestamp_us.saturating_sub(f.updated_us);
+        require!(carried <= freshness_secs as u64 * 1_000_000, AequaError::CollateralNotLive);
         Ok(Price { price_e8: math::price_e8(f.price, f.exponent)?, session: f.session as u8 })
     }
 }
@@ -231,20 +240,23 @@ mod tests {
         m
     }
 
-    fn payload(ts: u64, channel: u8, feeds: &[(u32, i64, i16, i16)]) -> Vec<u8> {
+    fn payload(ts: u64, channel: u8, feeds: &[(u32, i64, i16, i16, u64)]) -> Vec<u8> {
         let mut p = PAYLOAD_MAGIC.to_le_bytes().to_vec();
         p.extend_from_slice(&ts.to_le_bytes());
         p.push(channel);
         p.push(feeds.len() as u8);
-        for (id, price, expo, session) in feeds {
+        for (id, price, expo, session, updated) in feeds {
             p.extend_from_slice(&id.to_le_bytes());
-            p.push(4);
+            p.push(5);
             p.push(PROP_PRICE);
             p.extend_from_slice(&price.to_le_bytes());
             p.push(PROP_EXPONENT);
             p.extend_from_slice(&expo.to_le_bytes());
             p.push(5);
             p.extend_from_slice(&123i64.to_le_bytes());
+            p.push(PROP_FEED_UPDATE_TIMESTAMP);
+            p.push(1);
+            p.extend_from_slice(&updated.to_le_bytes());
             p.push(PROP_MARKET_SESSION);
             p.extend_from_slice(&session.to_le_bytes());
         }
@@ -254,29 +266,36 @@ mod tests {
     #[test]
     fn reads_feeds_and_sessions() {
         let ts = 1_791_212_400_000_000u64;
-        let m = envelope(&payload(ts, 3, &[(1398, 66_512_340, -5, 0), (1363, 59_001_000, -5, 3)]));
+        let m = envelope(&payload(ts, 3, &[(1398, 66_512_340, -5, 0, ts), (1363, 59_001_000, -5, 3, ts - 100_000)]));
         let u = parse(&m).unwrap();
         assert_eq!(u.feeds.len(), 2);
         u.require_fresh(1_791_212_405, 10).unwrap();
         assert!(u.require_fresh(1_791_212_411, 10).is_err());
-        let p = u.price(1398).unwrap();
+        let p = u.price(1398, 10).unwrap();
         assert_eq!((p.price_e8, p.session), (66_512_340_000, 0));
-        assert_eq!(u.price(1363).unwrap().session, 3);
-        assert!(u.price(1).is_err());
-        let closed = parse(&envelope(&payload(ts, 3, &[(1398, 66_512_340, -5, 4)]))).unwrap();
-        assert!(closed.price(1398).is_err(), "closed session");
+        assert_eq!(u.price(1363, 10).unwrap().session, 3);
+        assert!(u.price(1, 10).is_err());
+    }
+
+    #[test]
+    fn closed_and_carried_prices_are_not_live() {
+        let ts = 1_791_212_400_000_000u64;
+        let m = envelope(&payload(ts, 3, &[(1398, 66_512_340, -5, 4, ts), (1363, 59_001_000, -5, 0, ts - 60_000_000)]));
+        let u = parse(&m).unwrap();
+        assert!(u.price(1398, 10).is_err(), "closed session");
+        assert!(u.price(1363, 10).is_err(), "price carried forward a minute");
     }
 
     #[test]
     fn rejects_malformed() {
         let ts = 1_791_212_400_000_000u64;
-        let mut m = envelope(&payload(ts, 3, &[(1398, 1, -5, 0)]));
+        let mut m = envelope(&payload(ts, 3, &[(1398, 1, -5, 0, ts)]));
         m.push(0);
         assert!(parse(&m).is_err(), "trailing byte");
-        let mut p = payload(ts, 3, &[(1398, 1, -5, 0)]);
+        let mut p = payload(ts, 3, &[(1398, 1, -5, 0, ts)]);
         p[19] = 99; // first property id
         assert!(parse(&envelope(&p)).is_err(), "unknown property");
-        let u = parse(&envelope(&payload(ts, 4, &[(1398, 1, -5, 0)]))).unwrap();
+        let u = parse(&envelope(&payload(ts, 4, &[(1398, 1, -5, 0, ts)]))).unwrap();
         assert!(u.require_fresh(1_791_212_400, 10).is_err(), "one-second channel");
     }
 }

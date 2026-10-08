@@ -41,6 +41,7 @@ impl MintWithUsdc<'_> {
         require!(self.user_usdc.amount >= amount, AequaError::InsufficientFunds);
 
         let supply = self.usdq_mint.supply.checked_add(amount).ok_or(AequaError::MathOverflow)?;
+        require!(supply <= config.supply_cap(), AequaError::SupplyCapExceeded);
         let cap = config.params.usdc_hourly_cap;
         config.usdc_bucket.take(amount, cap, now)?;
 
