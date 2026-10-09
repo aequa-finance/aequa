@@ -45,7 +45,15 @@ pub enum AequaError {
     #[msg("The Pyth price is missing or not positive")]
     InvalidPythPrice,
 
+    // sUSDq
+    #[msg("The cooldown is still running")]
+    CooldownActive,
+    #[msg("There is nothing to claim")]
+    NothingToClaim,
+
     // Cranks
+    #[msg("Not due yet")]
+    NotDue,
     #[msg("Nothing to move")]
     NothingToMove,
 

@@ -34,9 +34,21 @@ pub struct MintView {
 /// confidential-transfer auto-approve off, transferable, no interest-bearing scale, and a
 /// positive finite multiplier. A failure closes the collateral's paths.
 pub fn read_mint(info: &AccountInfo, now: i64, before: u32, after: u32) -> Result<MintView> {
+    read(info, now, before, after, true)
+}
+
+/// The mint for valuation only (`distribute`): its multiplier and window, without the admission
+/// checks, so a vault whose issuer turned on a fee or a hook still counts at its value.
+pub fn read_mint_value(info: &AccountInfo, now: i64, before: u32, after: u32) -> Result<MintView> {
+    read(info, now, before, after, false)
+}
+
+fn read(info: &AccountInfo, now: i64, before: u32, after: u32, admit: bool) -> Result<MintView> {
     let data = info.try_borrow_data()?;
     let mint = StateWithExtensions::<Mint>::unpack(&data).map_err(|_| error!(AequaError::CollateralNotAdmissible))?;
-    admission(&mint)?;
+    if admit {
+        admission(&mint)?;
+    }
     view(&mint, now, before, after)
 }
 

@@ -92,6 +92,21 @@ pub mod aequa {
         ctx.accounts.run(&message, ed25519_index, amount, min_out)
     }
 
+    // sUSDq
+
+    pub fn stake_usdq(ctx: Context<StakeUsdq>, amount: u64, min_shares: u64) -> Result<()> {
+        ctx.accounts.run(amount, min_shares)
+    }
+
+    pub fn start_usdq_cooldown(ctx: Context<StartUsdqCooldown>, shares: u64) -> Result<()> {
+        let bump = ctx.bumps.cooldown;
+        ctx.accounts.run(shares, bump)
+    }
+
+    pub fn claim_usdq(ctx: Context<ClaimUsdq>) -> Result<()> {
+        ctx.accounts.run()
+    }
+
     // Hedge account
 
     pub fn report_hedge(ctx: Context<ReportHedge>, args: ReportArgs) -> Result<()> {
@@ -104,5 +119,11 @@ pub mod aequa {
 
     pub fn bridge_out(ctx: Context<BridgeOut>, amount: u64, max_fee: u64, fast: bool) -> Result<()> {
         ctx.accounts.run(amount, max_fee, fast)
+    }
+
+    // Cranks
+
+    pub fn distribute<'info>(ctx: Context<'info, Distribute<'info>>, message: Vec<u8>, ed25519_index: u16) -> Result<()> {
+        ctx.accounts.run(&message, ed25519_index, ctx.remaining_accounts)
     }
 }

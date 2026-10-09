@@ -41,6 +41,7 @@ pub mod seeds {
     pub const SUSDQ_VAULT: &[u8] = b"susdq_vault";
     pub const SUSDQ_ASSETS: &[u8] = b"susdq_assets";
     pub const SUSDQ_SILO: &[u8] = b"susdq_silo";
+    pub const SUSDQ_COOLDOWN: &[u8] = b"susdq_cooldown";
     pub const BUFFER: &[u8] = b"buffer";
     pub const LANDING: &[u8] = b"landing";
     pub const RESERVE_FUND: &[u8] = b"reserve_fund";

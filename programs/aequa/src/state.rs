@@ -295,6 +295,16 @@ pub struct Reserve {
     pub bridged_out_total: u64,
     pub landed_total: u64,
     pub last_distribution: i64,
+    /// NAV and supply at the last distribution, and the shortfall it left after burning the
+    /// Reserve Fund (zero when NAV covered supply).
+    pub last_nav: i64,
+    pub last_supply: u64,
+    pub deficit: u64,
+    /// Distributions in a row that found NAV below supply with the Reserve Fund spent.
+    pub deficit_streak: u8,
+    pub distributions: u64,
+    pub distributed_total: u64,
+    pub deficit_burned_total: u64,
     pub bump: u8,
     pub _reserved: [u8; 64],
 }
@@ -317,11 +327,67 @@ impl Reserve {
     }
 }
 
-/// sUSDq's state.
+/// A linear release of `amount` between `start` and `end` (sUSDq vesting).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq, InitSpace)]
+pub struct Vesting {
+    pub amount: u64,
+    pub start: i64,
+    pub end: i64,
+}
+
+impl Vesting {
+    pub fn vested(&self, now: i64) -> u64 {
+        math::vested(self.amount, self.start, self.end, now)
+    }
+
+    /// Moves what has vested out of the schedule, keeping the rest on the same rate.
+    pub fn fold(&mut self, now: i64) -> u64 {
+        let done = self.vested(now);
+        self.amount -= done;
+        if now > self.start {
+            self.start = now.min(self.end);
+        }
+        done
+    }
+
+    /// Restarts the schedule with what is left plus `more`, over `period` from now.
+    pub fn restart(&mut self, now: i64, more: u64, period: i64) -> Result<u64> {
+        let done = self.fold(now);
+        self.amount = self.amount.checked_add(more).ok_or(AequaError::MathOverflow)?;
+        self.start = now;
+        self.end = now + period;
+        Ok(done)
+    }
+}
+
+/// sUSDq's state: USDq it holds for stakers and what is still vesting.
 #[account]
 #[derive(InitSpace)]
 pub struct UsdqVault {
+    /// Vested USDq behind sUSDq. Tokens sent straight to the assets account don't count.
+    pub base: u64,
+    pub vesting: Vesting,
     pub susdq_mint: Pubkey,
     pub bump: u8,
     pub _reserved: [u8; 32],
+}
+
+impl UsdqVault {
+    pub fn total_assets(&self, now: i64) -> u64 {
+        self.base + self.vesting.vested(now)
+    }
+
+    /// Moves vested yield into `base`.
+    pub fn fold(&mut self, now: i64) {
+        self.base += self.vesting.fold(now);
+    }
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct UsdqCooldown {
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub unlock_at: i64,
+    pub bump: u8,
 }
