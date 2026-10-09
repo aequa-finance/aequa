@@ -26,6 +26,8 @@ pub enum AequaError {
     // Collateral state
     #[msg("No fresh price for this collateral: the session is closed")]
     CollateralNotLive,
+    #[msg("The hedge report is stale or the hedge market is paused")]
+    HedgeNotLive,
     #[msg("This collateral is inside a corporate-action window")]
     CorporateActionWindow,
     #[msg("The issuer has paused this collateral's mint")]
@@ -42,6 +44,16 @@ pub enum AequaError {
     WrongPythChannel,
     #[msg("The Pyth price is missing or not positive")]
     InvalidPythPrice,
+
+    // Cranks
+    #[msg("Nothing to move")]
+    NothingToMove,
+
+    // Hedge reporting and the desk
+    #[msg("The report is older than the last one")]
+    ReportOutOfOrder,
+    #[msg("The bridge route is not set")]
+    BridgeNotSet,
 
     // Configuration
     #[msg("The signer does not hold this role")]

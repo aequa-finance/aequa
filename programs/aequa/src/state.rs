@@ -4,7 +4,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::MAX_COLLATERALS;
+use crate::constants::{cctp, MAX_COLLATERALS};
 use crate::errors::AequaError;
 use crate::math;
 
@@ -106,6 +106,68 @@ impl Bucket {
     }
 }
 
+/// Where `bridge_out` sends USDC: a Circle CCTP V2 burn to HyperEVM whose hook
+/// names the hedge account, so Circle's CctpForwarder mints and credits it on HyperCore.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
+pub struct BridgeRoute {
+    pub token_messenger_minter: Pubkey,
+    pub message_transmitter: Pubkey,
+    /// HyperEVM's CCTP domain (19).
+    pub destination_domain: u32,
+    /// The CctpForwarder, left-padded to 32 bytes; also the only allowed caller.
+    pub mint_recipient: [u8; 32],
+    pub destination_caller: [u8; 32],
+    /// The keeper's fee may be at most `amount × max_fee_bps / 10,000 + max_fee_flat`.
+    pub max_fee_bps: u16,
+    pub max_fee_flat: u64,
+    /// The forwarding hook: "cctp-forward", version 0, the hedge account and its dex.
+    pub hook_len: u8,
+    pub hook_data: [u8; 96],
+}
+
+impl Default for BridgeRoute {
+    fn default() -> Self {
+        Self {
+            token_messenger_minter: Pubkey::default(),
+            message_transmitter: Pubkey::default(),
+            destination_domain: 0,
+            mint_recipient: [0; 32],
+            destination_caller: [0; 32],
+            max_fee_bps: 0,
+            max_fee_flat: 0,
+            hook_len: 0,
+            hook_data: [0; 96],
+        }
+    }
+}
+
+impl BridgeRoute {
+    pub fn is_set(&self) -> bool {
+        self.token_messenger_minter != Pubkey::default() && self.mint_recipient != [0u8; 32]
+    }
+
+    /// The route to a HyperCore account: CCTP V2 to HyperEVM, Circle's CctpForwarder as mint
+    /// recipient and caller, and the forwarding hook naming the account (version 0, 24 bytes
+    /// of data: the address and the main perp dex).
+    pub fn to_hypercore(recipient: [u8; 20], max_fee_bps: u16, max_fee_flat: u64) -> Self {
+        let mut hook_data = [0u8; 96];
+        hook_data[..cctp::HOOK_MAGIC.len()].copy_from_slice(cctp::HOOK_MAGIC);
+        hook_data[28..32].copy_from_slice(&24u32.to_be_bytes());
+        hook_data[32..52].copy_from_slice(&recipient);
+        Self {
+            token_messenger_minter: cctp::TOKEN_MESSENGER_MINTER,
+            message_transmitter: cctp::MESSAGE_TRANSMITTER,
+            destination_domain: cctp::HYPEREVM_DOMAIN,
+            mint_recipient: cctp::FORWARDER,
+            destination_caller: cctp::FORWARDER,
+            max_fee_bps,
+            max_fee_flat,
+            hook_len: cctp::HOOK_LEN as u8,
+            hook_data,
+        }
+    }
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct Config {
@@ -125,6 +187,7 @@ pub struct Config {
     pub spot_cap_total: u64,
     pub collateral_count: u8,
     pub collaterals: [Pubkey; MAX_COLLATERALS],
+    pub bridge: BridgeRoute,
     pub bumps: Bumps,
     pub _reserved: [u8; 128],
 }
@@ -138,6 +201,7 @@ pub struct Bumps {
     pub usdq_mint: u8,
     pub susdq_mint: u8,
     pub buffer: u8,
+    pub landing: u8,
     pub susdq_assets: u8,
     pub susdq_silo: u8,
     pub reserve_fund: u8,
@@ -205,12 +269,52 @@ pub struct Collateral {
     pub _reserved: [u8; 64],
 }
 
+/// The reporter's latest figures for the hedge account.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq, InitSpace)]
+pub struct HedgeReport {
+    /// Account value on HyperCore, dollars at 6 decimals.
+    pub account_value: i64,
+    /// Short notional per collateral index, dollars at 6 decimals.
+    pub short_notional: [u64; MAX_COLLATERALS],
+    /// Bit i: the perp of collateral i trades in its external session.
+    pub market_live: u8,
+    /// USDC credited to the hedge account from `bridge_out`, cumulative.
+    pub credited_total: u64,
+    /// USDC withdrawn from the hedge account towards the landing account, cumulative.
+    pub withdrawn_total: u64,
+    /// HyperCore's time for these figures, in milliseconds.
+    pub hl_time: i64,
+    /// Solana time the report landed.
+    pub reported_at: i64,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct Reserve {
+    pub report: HedgeReport,
+    pub bridged_out_total: u64,
+    pub landed_total: u64,
     pub last_distribution: i64,
     pub bump: u8,
     pub _reserved: [u8; 64],
+}
+
+impl Reserve {
+    /// `(bridged_out − credited) + (withdrawn − landed)`: USDC between the chains.
+    pub fn in_flight(&self) -> i128 {
+        (self.bridged_out_total as i128 - self.report.credited_total as i128)
+            + (self.report.withdrawn_total as i128 - self.landed_total as i128)
+    }
+
+    /// A report counts while HyperCore's time for its figures is within `freshness` of now.
+    pub fn report_fresh(&self, now: i64, freshness: u32) -> bool {
+        self.report.reported_at > 0 && now.saturating_mul(1_000).saturating_sub(self.report.hl_time) <= freshness as i64 * 1_000
+    }
+
+    /// Hedge live for a collateral: a fresh report that marks its perp in session.
+    pub fn hedge_live(&self, index: u8, now: i64, freshness: u32) -> bool {
+        self.report_fresh(now, freshness) && self.report.market_live & (1u8 << index) != 0
+    }
 }
 
 /// sUSDq's state.

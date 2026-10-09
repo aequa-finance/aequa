@@ -6,7 +6,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::seeds::*;
 use crate::errors::AequaError;
-use crate::state::{path, Bucket, Bumps, Collateral, Config, Params, Reserve, UsdqVault};
+use crate::state::{path, Bucket, Bumps, BridgeRoute, Collateral, Config, Params, Reserve, UsdqVault};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct InitializeArgs {
@@ -77,7 +77,7 @@ impl Initialize<'_> {
 }
 
 /// Creates the buffer, the Reserve Fund, the protocol vault and sUSDq's two accounts, each at
-/// its PDA and its own authority.
+/// its PDA and its own authority, and records the landing account.
 #[derive(Accounts)]
 pub struct CreateVaults<'info> {
     #[account(mut)]
@@ -91,6 +91,14 @@ pub struct CreateVaults<'info> {
     pub usdc_mint: UncheckedAccount<'info>,
     #[account(init, payer = payer, seeds = [BUFFER], bump, token::mint = usdc_mint, token::authority = buffer, token::token_program = token_program)]
     pub buffer: Box<Account<'info, TokenAccount>>,
+    /// CHECK: the landing account's authority: a PDA that holds no data and signs only for it.
+    #[account(seeds = [LANDING], bump)]
+    pub landing_authority: UncheckedAccount<'info>,
+    /// USDC from HyperCore lands here: the associated token account of `landing_authority`,
+    /// the form Circle's forwarding service mints into. Anyone can create an associated
+    /// account, so the setup creates it (idempotently) and this only checks it.
+    #[account(associated_token::mint = usdc_mint, associated_token::authority = landing_authority, associated_token::token_program = token_program)]
+    pub landing: Box<Account<'info, TokenAccount>>,
     #[account(init, payer = payer, seeds = [RESERVE_FUND], bump, token::mint = usdq_mint, token::authority = reserve_fund, token::token_program = token_program)]
     pub reserve_fund: Box<Account<'info, TokenAccount>>,
     #[account(init, payer = payer, seeds = [PROTOCOL], bump, token::mint = usdq_mint, token::authority = protocol, token::token_program = token_program)]
@@ -107,12 +115,21 @@ impl CreateVaults<'_> {
     pub fn run(&mut self, bumps: &CreateVaultsBumps) -> Result<()> {
         let b = &mut self.config.bumps;
         b.buffer = bumps.buffer;
+        b.landing = bumps.landing_authority;
         b.reserve_fund = bumps.reserve_fund;
         b.protocol = bumps.protocol;
         b.susdq_assets = bumps.susdq_assets;
         b.susdq_silo = bumps.susdq_silo;
         Ok(())
     }
+}
+
+/// `set_bridge_route`'s arguments: the hedge account on HyperCore and the fee cap.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct BridgeArgs {
+    pub recipient: [u8; 20],
+    pub max_fee_bps: u16,
+    pub max_fee_flat: u64,
 }
 
 #[derive(Accounts)]
@@ -142,6 +159,16 @@ impl AdminOnly<'_> {
         config.keeper = keeper;
         config.reporter = reporter;
         config.pending_admin = pending_admin;
+        Ok(())
+    }
+
+    /// Names the hedge account bridged margin goes to; the rest of the route is fixed.
+    pub fn set_bridge_route(&mut self, args: BridgeArgs) -> Result<()> {
+        require!(args.recipient != [0u8; 20], AequaError::ParamOutOfRange);
+        // A fee cap of at most 10 bps and $5 a transfer; Circle's fast fee is 1 bps and its
+        // forwarding fee about $0.25.
+        require!(args.max_fee_bps <= 10 && args.max_fee_flat <= 5_000_000, AequaError::ParamOutOfRange);
+        self.config.bridge = BridgeRoute::to_hypercore(args.recipient, args.max_fee_bps, args.max_fee_flat);
         Ok(())
     }
 

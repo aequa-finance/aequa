@@ -1,7 +1,7 @@
 //! The xStock paths: mint USDq against SPYx or QQQx at the Pyth price less
 //! the session band, and redeem USDq for them at the price plus the band. Both need the
-//! collateral live (a fresh price in an open session), no corporate-action window and the
-//! issuer's mint unpaused.
+//! collateral live (a fresh price in an open session), the hedge live (a fresh report with the
+//! perp in session), no corporate-action window and the issuer's mint unpaused.
 
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -15,14 +15,15 @@ use crate::instructions::common::{fee_bps, fee_to_reserve_fund};
 use crate::math;
 use crate::instructions::pyth_pro::*;
 use crate::pyth::{self, Price};
-use crate::state::{path, Collateral, Config};
+use crate::state::{path, Collateral, Config, Reserve};
 use crate::token2022::{read_mint, MintView};
 
 /// Everything an xStock path checks before it prices anything.
-fn open_path(config: &Config, collateral: &Collateral, mint: &AccountInfo, update: &pyth::Update, now: i64) -> Result<(MintView, Price)> {
+fn open_path(config: &Config, reserve: &Reserve, collateral: &Collateral, mint: &AccountInfo, update: &pyth::Update, now: i64) -> Result<(MintView, Price)> {
     let p = &config.params;
     let view = read_mint(mint, now, p.ca_window_before_secs, p.ca_window_after_secs)?;
     view.require_open()?;
+    require!(reserve.hedge_live(collateral.index, now, p.report_freshness_secs), AequaError::HedgeNotLive);
     update.require_fresh(now, p.pyth_freshness_secs)?;
     let price = update.price(collateral.feed, p.pyth_freshness_secs)?;
     Ok((view, price))
@@ -34,6 +35,8 @@ pub struct MintWithCollateral<'info> {
     pub user: Signer<'info>,
     #[account(seeds = [CONFIG], bump = config.bumps.config, has_one = usdq_mint)]
     pub config: Box<Account<'info, Config>>,
+    #[account(seeds = [RESERVE], bump = reserve.bump)]
+    pub reserve: Box<Account<'info, Reserve>>,
     #[account(mut, seeds = [COLLATERAL, mint.key().as_ref()], bump = collateral.bump, has_one = mint, has_one = vault)]
     pub collateral: Box<Account<'info, Collateral>>,
     /// CHECK: the listed mint (the collateral's `has_one`); `read_mint` reads it raw.
@@ -69,7 +72,7 @@ impl MintWithCollateral<'_> {
         require!(self.user_xstock.amount >= amount, AequaError::InsufficientFunds);
 
         let update = self.pyth.verify(&self.user.to_account_info(), message, ed25519_index)?;
-        let (view, price) = open_path(config, &self.collateral, &self.mint.to_account_info(), &update, now)?;
+        let (view, price) = open_path(config, &self.reserve, &self.collateral, &self.mint.to_account_info(), &update, now)?;
         let c = &mut self.collateral;
         let band = c.bands_bps[price.session as usize];
         let value = math::xstock_to_usd(amount, view.multiplier_e12, price.price_e8, band, view.decimals)?;
@@ -129,6 +132,8 @@ pub struct RedeemForCollateral<'info> {
     pub user: Signer<'info>,
     #[account(seeds = [CONFIG], bump = config.bumps.config, has_one = usdq_mint)]
     pub config: Box<Account<'info, Config>>,
+    #[account(seeds = [RESERVE], bump = reserve.bump)]
+    pub reserve: Box<Account<'info, Reserve>>,
     #[account(mut, seeds = [COLLATERAL, mint.key().as_ref()], bump = collateral.bump, has_one = mint, has_one = vault)]
     pub collateral: Box<Account<'info, Collateral>>,
     /// CHECK: the listed mint (the collateral's `has_one`); `read_mint` reads it raw.
@@ -164,7 +169,7 @@ impl RedeemForCollateral<'_> {
         require!(self.user_usdq.amount >= amount, AequaError::InsufficientFunds);
 
         let update = self.pyth.verify(&self.user.to_account_info(), message, ed25519_index)?;
-        let (view, price) = open_path(config, &self.collateral, &self.mint.to_account_info(), &update, now)?;
+        let (view, price) = open_path(config, &self.reserve, &self.collateral, &self.mint.to_account_info(), &update, now)?;
         let c = &mut self.collateral;
         let band = c.bands_bps[price.session as usize];
 

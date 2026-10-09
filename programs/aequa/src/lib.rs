@@ -51,6 +51,10 @@ pub mod aequa {
         ctx.accounts.run()
     }
 
+    pub fn set_bridge_route(ctx: Context<AdminOnly>, args: BridgeArgs) -> Result<()> {
+        ctx.accounts.set_bridge_route(args)
+    }
+
     pub fn set_token_metadata(ctx: Context<SetTokenMetadata>, args: TokenMetadataArgs) -> Result<()> {
         ctx.accounts.run(args)
     }
@@ -86,5 +90,19 @@ pub mod aequa {
 
     pub fn redeem_for_collateral(ctx: Context<RedeemForCollateral>, message: Vec<u8>, ed25519_index: u16, amount: u64, min_out: u64) -> Result<()> {
         ctx.accounts.run(&message, ed25519_index, amount, min_out)
+    }
+
+    // Hedge account
+
+    pub fn report_hedge(ctx: Context<ReportHedge>, args: ReportArgs) -> Result<()> {
+        ctx.accounts.run(args)
+    }
+
+    pub fn land_usdc(ctx: Context<LandUsdc>) -> Result<()> {
+        ctx.accounts.run()
+    }
+
+    pub fn bridge_out(ctx: Context<BridgeOut>, amount: u64, max_fee: u64, fast: bool) -> Result<()> {
+        ctx.accounts.run(amount, max_fee, fast)
     }
 }
