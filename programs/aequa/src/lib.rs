@@ -6,6 +6,7 @@ use anchor_lang::prelude::*;
 pub mod constants;
 pub mod errors;
 pub mod instructions;
+pub mod jupiter;
 pub mod math;
 pub mod params;
 pub mod pyth;
@@ -28,6 +29,10 @@ pub mod aequa {
     }
 
     pub fn create_vaults(ctx: Context<CreateVaults>) -> Result<()> {
+        ctx.accounts.run(&ctx.bumps)
+    }
+
+    pub fn create_susdq_vaults(ctx: Context<CreateSusdqVaults>) -> Result<()> {
         ctx.accounts.run(&ctx.bumps)
     }
 
@@ -119,6 +124,12 @@ pub mod aequa {
 
     pub fn bridge_out(ctx: Context<BridgeOut>, amount: u64, max_fee: u64, fast: bool) -> Result<()> {
         ctx.accounts.run(amount, max_fee, fast)
+    }
+
+    /// The keeper's swap between the buffer and a collateral vault. The Jupiter route's
+    /// accounts follow as remaining accounts.
+    pub fn swap<'info>(ctx: Context<'info, Swap<'info>>, message: Vec<u8>, ed25519_index: u16, buy: bool, amount_in: u64, route: Vec<u8>) -> Result<()> {
+        ctx.accounts.run(&message, ed25519_index, buy, amount_in, &route, ctx.remaining_accounts)
     }
 
     // Cranks

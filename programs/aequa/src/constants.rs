@@ -46,4 +46,7 @@ pub mod seeds {
     pub const LANDING: &[u8] = b"landing";
     pub const RESERVE_FUND: &[u8] = b"reserve_fund";
     pub const PROTOCOL: &[u8] = b"protocol";
+    /// Owns the transit accounts (its associated token accounts) that every Jupiter swap
+    /// passes through; they are empty outside the instruction.
+    pub const SWAP_AUTHORITY: &[u8] = b"swap_authority";
 }

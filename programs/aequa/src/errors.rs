@@ -60,6 +60,12 @@ pub enum AequaError {
     // Hedge reporting and the desk
     #[msg("The report is older than the last one")]
     ReportOutOfOrder,
+    #[msg("The swap route is not a Jupiter route over the expected accounts")]
+    InvalidRoute,
+    #[msg("The swap returned less than the Pyth price allows")]
+    SwapBelowMinimum,
+    #[msg("The swap spent more than it was given")]
+    SwapOverspent,
     #[msg("The bridge route is not set")]
     BridgeNotSet,
 

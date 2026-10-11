@@ -47,6 +47,8 @@ pub struct Params {
     /// Active stAEQUA, in whole AEQUA, for each lower fee tier.
     pub tier_stake: [u64; 2],
     pub tier_fee_bps: [u16; 2],
+    /// The keeper's swaps must clear the Pyth price less this.
+    pub keeper_slippage_bps: u16,
     pub pyth_freshness_secs: u32,
     pub report_freshness_secs: u32,
     pub distribution_interval_secs: u32,
@@ -189,6 +191,8 @@ pub struct Config {
     pub collaterals: [Pubkey; MAX_COLLATERALS],
     pub bridge: BridgeRoute,
     pub bumps: Bumps,
+    /// The swap authority's USDC transit account.
+    pub transit_usdc: Pubkey,
     pub _reserved: [u8; 128],
 }
 
@@ -206,6 +210,7 @@ pub struct Bumps {
     pub susdq_silo: u8,
     pub reserve_fund: u8,
     pub protocol: u8,
+    pub swap_authority: u8,
 }
 
 impl Config {
@@ -264,6 +269,8 @@ pub struct Collateral {
     /// The hedge market, e.g. "xyz:SP500", and its HyperCore asset id.
     pub perp: [u8; 24],
     pub perp_asset: u32,
+    /// The swap authority's transit account for this collateral.
+    pub transit: Pubkey,
     pub bump: u8,
     pub vault_bump: u8,
     pub _reserved: [u8; 64],

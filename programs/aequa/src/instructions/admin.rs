@@ -76,8 +76,9 @@ impl Initialize<'_> {
     }
 }
 
-/// Creates the buffer, the Reserve Fund, the protocol vault and sUSDq's two accounts, each at
-/// its PDA and its own authority, and records the landing account.
+/// Creates the buffer, the Reserve Fund and the protocol vault, each at its PDA and its own
+/// authority, and records the landing and USDC transit accounts. sUSDq's accounts follow in
+/// `create_susdq_vaults` (one instruction would run past the stack).
 #[derive(Accounts)]
 pub struct CreateVaults<'info> {
     #[account(mut)]
@@ -99,14 +100,16 @@ pub struct CreateVaults<'info> {
     /// account, so the setup creates it (idempotently) and this only checks it.
     #[account(associated_token::mint = usdc_mint, associated_token::authority = landing_authority, associated_token::token_program = token_program)]
     pub landing: Box<Account<'info, TokenAccount>>,
+    /// CHECK: the swap authority PDA; holds no data.
+    #[account(seeds = [SWAP_AUTHORITY], bump)]
+    pub swap_authority: UncheckedAccount<'info>,
+    /// The swap authority's USDC transit account, created by the setup like `landing`.
+    #[account(associated_token::mint = usdc_mint, associated_token::authority = swap_authority, associated_token::token_program = token_program)]
+    pub transit_usdc: Box<Account<'info, TokenAccount>>,
     #[account(init, payer = payer, seeds = [RESERVE_FUND], bump, token::mint = usdq_mint, token::authority = reserve_fund, token::token_program = token_program)]
     pub reserve_fund: Box<Account<'info, TokenAccount>>,
     #[account(init, payer = payer, seeds = [PROTOCOL], bump, token::mint = usdq_mint, token::authority = protocol, token::token_program = token_program)]
     pub protocol: Box<Account<'info, TokenAccount>>,
-    #[account(init, payer = payer, seeds = [SUSDQ_ASSETS], bump, token::mint = usdq_mint, token::authority = susdq_assets, token::token_program = token_program)]
-    pub susdq_assets: Box<Account<'info, TokenAccount>>,
-    #[account(init, payer = payer, seeds = [SUSDQ_SILO], bump, token::mint = usdq_mint, token::authority = susdq_silo, token::token_program = token_program)]
-    pub susdq_silo: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -116,8 +119,35 @@ impl CreateVaults<'_> {
         let b = &mut self.config.bumps;
         b.buffer = bumps.buffer;
         b.landing = bumps.landing_authority;
+        b.swap_authority = bumps.swap_authority;
         b.reserve_fund = bumps.reserve_fund;
         b.protocol = bumps.protocol;
+        self.config.transit_usdc = self.transit_usdc.key();
+        Ok(())
+    }
+}
+
+/// Creates sUSDq's USDq accounts: the assets behind sUSDq and the silo cooling USDq waits in.
+#[derive(Accounts)]
+pub struct CreateSusdqVaults<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [CONFIG], bump = config.bumps.config, has_one = admin @ AequaError::Unauthorized, has_one = usdq_mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub admin: Signer<'info>,
+    /// CHECK: Config's USDq mint (`has_one`).
+    pub usdq_mint: UncheckedAccount<'info>,
+    #[account(init, payer = payer, seeds = [SUSDQ_ASSETS], bump, token::mint = usdq_mint, token::authority = susdq_assets, token::token_program = token_program)]
+    pub susdq_assets: Box<Account<'info, TokenAccount>>,
+    #[account(init, payer = payer, seeds = [SUSDQ_SILO], bump, token::mint = usdq_mint, token::authority = susdq_silo, token::token_program = token_program)]
+    pub susdq_silo: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+impl CreateSusdqVaults<'_> {
+    pub fn run(&mut self, bumps: &CreateSusdqVaultsBumps) -> Result<()> {
+        let b = &mut self.config.bumps;
         b.susdq_assets = bumps.susdq_assets;
         b.susdq_silo = bumps.susdq_silo;
         Ok(())

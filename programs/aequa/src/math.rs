@@ -49,6 +49,11 @@ pub fn xstock_value(raw: u64, mult_e12: u128, price_e8: u64, decimals: u8) -> Re
     xstock_to_usd(raw, mult_e12, price_e8, 0, decimals)
 }
 
+/// Raw units worth `usd` at the mid price, rounded down.
+pub fn usd_to_xstock_mid(usd: u64, mult_e12: u128, price_e8: u64, decimals: u8) -> Result<u64> {
+    usd_to_xstock(usd, mult_e12, price_e8, 0, decimals)
+}
+
 /// The bucket's level at `now`: `min(cap, available + cap × elapsed / 3600)`.
 pub fn bucket_level(available: u64, updated_at: i64, cap: u64, now: i64) -> u64 {
     let elapsed = now.saturating_sub(updated_at).max(0) as u128;
@@ -83,6 +88,14 @@ pub fn vested(amount: u64, start: i64, end: i64, now: i64) -> u64 {
         return 0;
     }
     ((amount as u128) * ((now - start) as u128) / ((end - start) as u128)) as u64
+}
+
+/// `x × num / den`, rounded down, for u64 amounts and bps-like ratios.
+pub fn mul_div(x: u64, num: u64, den: u64) -> Result<u64> {
+    require!(den != 0, AequaError::MathOverflow);
+    let v = (x as u128) * (num as u128) / (den as u128);
+    require!(v <= u64::MAX as u128, AequaError::MathOverflow);
+    Ok(v as u64)
 }
 
 /// A Pyth price `mantissa × 10^expo` at 8 decimals, rounded down.

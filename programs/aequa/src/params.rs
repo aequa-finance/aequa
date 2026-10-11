@@ -36,6 +36,7 @@ impl Params {
             base_fee_bps: 10,
             tier_stake: [100_000, 1_000_000],
             tier_fee_bps: [5, 2],
+            keeper_slippage_bps: 50,
             pyth_freshness_secs: 10,
             report_freshness_secs: 120,
             distribution_interval_secs: 8 * HOUR as u32,
@@ -72,6 +73,7 @@ impl Params {
             require!(self.tier_fee_bps[i] <= self.base_fee_bps, AequaError::ParamOutOfRange);
         }
         require!(self.tier_stake[0] <= self.tier_stake[1], AequaError::ParamOutOfRange);
+        within(self.keeper_slippage_bps, 10, 100)?;
         within(self.pyth_freshness_secs, 2, 30)?;
         within(self.report_freshness_secs, 30, 600)?;
         within(self.distribution_interval_secs as i64, HOUR, 24 * HOUR)?;

@@ -42,6 +42,13 @@ pub struct AddCollateral<'info> {
         token::token_program = token_program,
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: the swap authority PDA; holds no data.
+    #[account(seeds = [SWAP_AUTHORITY], bump = config.bumps.swap_authority)]
+    pub swap_authority: UncheckedAccount<'info>,
+    /// The swap authority's transit account for this mint; anyone can create it, so the setup
+    /// creates it (idempotently) and this only checks it.
+    #[account(associated_token::mint = mint, associated_token::authority = swap_authority, associated_token::token_program = token_program)]
+    pub transit: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
@@ -75,6 +82,7 @@ impl AddCollateral<'_> {
         c.redeem_bucket = Bucket::full(args.hourly_cap, now);
         c.perp = args.perp;
         c.perp_asset = args.perp_asset;
+        c.transit = self.transit.key();
         c.bump = bumps.collateral;
         c.vault_bump = bumps.vault;
 

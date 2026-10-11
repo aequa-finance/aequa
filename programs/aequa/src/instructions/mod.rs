@@ -8,6 +8,7 @@ pub mod listing;
 pub mod metadata;
 pub mod pyth_pro;
 pub mod susdq;
+pub mod swap;
 pub mod usdc;
 
 pub use admin::*;
@@ -19,4 +20,5 @@ pub use listing::*;
 pub use metadata::*;
 pub use pyth_pro::*;
 pub use susdq::*;
+pub use swap::*;
 pub use usdc::*;
