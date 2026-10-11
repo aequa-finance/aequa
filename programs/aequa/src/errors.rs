@@ -66,6 +66,14 @@ pub enum AequaError {
     NotDue,
     #[msg("Nothing to move")]
     NothingToMove,
+    #[msg("The deficit has not held long enough")]
+    DeficitNotHeld,
+    #[msg("The slash cap for the rolling window is used")]
+    SlashCapReached,
+    #[msg("The fill is outside the bound around the TWAP")]
+    TwapBound,
+    #[msg("Not enough price observations for the TWAP")]
+    TwapNotReady,
 
     // Hedge reporting and the desk
     #[msg("The report is older than the last one")]

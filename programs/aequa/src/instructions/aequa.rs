@@ -3,15 +3,28 @@
 //! when the pool covers a deficit; tokens sent straight to the vault don't count.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked},
+};
 
 use crate::constants::{seeds::*, AEQUA_WINDOW_SECS};
 use crate::errors::AequaError;
 use crate::math;
 use crate::signer;
-use crate::state::{path, AequaPool, AequaSetup, AequaStake, Config, StakeState};
+use crate::state::{path, AequaPool, AequaSetup, AequaStake, Config, StakeState, Twap};
 
-/// Sets the AEQUA mint once it exists and creates the stake pool's vault.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct AequaArgs {
+    /// The designated pool and its two reserve accounts.
+    pub pool: Pubkey,
+    pub pool_aequa_vault: Pubkey,
+    pub pool_quote_vault: Pubkey,
+    /// Zero when the pool's quote asset is a dollar; otherwise its Pyth Pro feed.
+    pub quote_feed: u32,
+}
+
+/// Sets the AEQUA mint once it exists and creates the pool's vaults.
 #[derive(Accounts)]
 pub struct SetAequa<'info> {
     #[account(mut)]
@@ -21,6 +34,12 @@ pub struct SetAequa<'info> {
     pub admin: Signer<'info>,
     #[account(mint::token_program = token_program)]
     pub mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(token::mint = mint, token::token_program = token_program)]
+    pub pool_aequa_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(token::mint = quote_mint, token::token_program = quote_token_program)]
+    pub pool_quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(
         init_if_needed,
         payer = payer,
@@ -31,17 +50,67 @@ pub struct SetAequa<'info> {
         token::token_program = token_program,
     )]
     pub aequa_pool_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init_if_needed,
+        payer = payer,
+        seeds = [SLASH_SALE],
+        bump,
+        token::mint = mint,
+        token::authority = slash_sale,
+        token::token_program = token_program,
+    )]
+    pub slash_sale: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(init_if_needed, payer = payer, space = 8 + Twap::INIT_SPACE, seeds = [TWAP], bump)]
+    pub twap: Box<Account<'info, Twap>>,
+    /// CHECK: the swap authority PDA.
+    #[account(seeds = [SWAP_AUTHORITY], bump = config.bumps.swap_authority)]
+    pub swap_authority: UncheckedAccount<'info>,
+    /// The transit account buybacks and slash sales pass through.
+    #[account(
+        init_if_needed,
+        payer = payer,
+        associated_token::mint = mint,
+        associated_token::authority = swap_authority,
+        associated_token::token_program = token_program,
+    )]
+    pub transit_aequa: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
 impl SetAequa<'_> {
-    pub fn run(&mut self, bumps: &SetAequaBumps) -> Result<()> {
+    pub fn run(&mut self, args: AequaArgs, bumps: &SetAequaBumps) -> Result<()> {
         let config = &mut self.config;
-        // The mint can be set once.
+        // The mint can be set once; the pool can move by a later call with the same mint.
         require!(!config.aequa.is_set() || config.aequa.mint == self.mint.key(), AequaError::ParamOutOfRange);
-        config.aequa = AequaSetup { mint: self.mint.key(), token_program: self.token_program.key(), decimals: self.mint.decimals };
+        require!(args.pool_aequa_vault == self.pool_aequa_vault.key(), AequaError::ParamOutOfRange);
+        require!(args.pool_quote_vault == self.pool_quote_vault.key(), AequaError::ParamOutOfRange);
+        config.aequa = AequaSetup {
+            mint: self.mint.key(),
+            token_program: self.token_program.key(),
+            decimals: self.mint.decimals,
+            transit: self.transit_aequa.key(),
+            pool: args.pool,
+            pool_aequa_vault: args.pool_aequa_vault,
+            pool_quote_vault: args.pool_quote_vault,
+            quote_mint: self.quote_mint.key(),
+            quote_decimals: self.quote_mint.decimals,
+            quote_feed: args.quote_feed,
+        };
         config.bumps.aequa_pool_vault = bumps.aequa_pool_vault;
+        config.bumps.slash_sale = bumps.slash_sale;
+        config.bumps.twap = bumps.twap;
+        // A new pool starts a new price history.
+        let twap = &mut self.twap;
+        if twap.pool != args.pool {
+            twap.pool = args.pool;
+            twap.head = 0;
+            twap.count = 0;
+            twap.last_price = 0;
+        }
+        twap.bump = bumps.twap;
         Ok(())
     }
 }

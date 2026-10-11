@@ -4,7 +4,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::{cctp, MAX_COLLATERALS};
+use crate::constants::{cctp, DAY, MAX_COLLATERALS, SLASH_RECORDS};
 use crate::errors::AequaError;
 use crate::math;
 
@@ -62,7 +62,14 @@ pub struct Params {
     pub protocol_share_bps: u16,
     pub reserve_fund_target_bps: u16,
     pub susdq_cooldown_secs: u32,
+    pub buyback_max_chunk: u64,
+    pub buyback_twap_bound_bps: u16,
+    pub buyback_burn_bps: u16,
+    pub aequa_stream_secs: u32,
     pub aequa_cooldown_secs: u32,
+    pub slash_cap_bps: u16,
+    pub deficit_hold: u8,
+    pub slash_twap_bound_bps: u16,
     /// The corporate-action window around a scheduled multiplier change.
     pub ca_window_before_secs: u32,
     pub ca_window_after_secs: u32,
@@ -177,6 +184,17 @@ pub struct AequaSetup {
     pub mint: Pubkey,
     pub token_program: Pubkey,
     pub decimals: u8,
+    /// The swap authority's AEQUA transit account.
+    pub transit: Pubkey,
+    /// The designated pool the buyback prices against, and its two reserves.
+    pub pool: Pubkey,
+    pub pool_aequa_vault: Pubkey,
+    pub pool_quote_vault: Pubkey,
+    /// The pool's quote asset and how it converts to dollars.
+    pub quote_mint: Pubkey,
+    pub quote_decimals: u8,
+    /// Zero when the quote asset is a dollar (USDC, USDq); otherwise a Pyth Pro feed for it.
+    pub quote_feed: u32,
 }
 
 impl AequaSetup {
@@ -228,7 +246,9 @@ pub struct Bumps {
     pub reserve_fund: u8,
     pub protocol: u8,
     pub aequa_pool_vault: u8,
+    pub slash_sale: u8,
     pub swap_authority: u8,
+    pub twap: u8,
 }
 
 impl Config {
@@ -339,6 +359,8 @@ pub struct Reserve {
     pub deficit: u64,
     /// Distributions in a row that found NAV below supply with the Reserve Fund spent.
     pub deficit_streak: u8,
+    /// When `cover_deficit` last moved AEQUA; once per distribution.
+    pub last_cover: i64,
     pub distributions: u64,
     pub distributed_total: u64,
     pub deficit_burned_total: u64,
@@ -453,6 +475,13 @@ pub struct UsdqCooldown {
     pub bump: u8,
 }
 
+/// One slash: AEQUA moved to the sale vault, and when.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq, InitSpace)]
+pub struct SlashRecord {
+    pub at: i64,
+    pub amount: u64,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct AequaPool {
@@ -460,6 +489,20 @@ pub struct AequaPool {
     pub base: u64,
     pub stream: Vesting,
     pub total_shares: u64,
+    pub usdq_spent: u64,
+    pub aequa_bought: u64,
+    pub aequa_burned: u64,
+    pub aequa_streamed: u64,
+    pub buybacks: u64,
+    /// What `buyback` may still spend: `buyback_max_chunk` an hour, refilled continuously, so
+    /// small calls can't use up the hour.
+    pub buyback_bucket: Bucket,
+    pub slashes: [SlashRecord; SLASH_RECORDS],
+    pub slashed_total: u64,
+    pub slash_sold_total: u64,
+    pub slash_usdq_burned: u64,
+    /// What `sell_slashed` may still sell, in dollars at the TWAP: `buyback_max_chunk` an hour.
+    pub slash_bucket: Bucket,
     pub bump: u8,
     pub _reserved: [u8; 48],
 }
@@ -471,6 +514,26 @@ impl AequaPool {
 
     pub fn fold(&mut self, now: i64) {
         self.base += self.stream.fold(now);
+    }
+
+    /// AEQUA slashed within the rolling window ending at `now`.
+    pub fn slashed_since(&self, now: i64, window: i64) -> u64 {
+        self.slashes.iter().filter(|r| r.amount > 0 && now - r.at < window).map(|r| r.amount).sum()
+    }
+
+    /// Records a slash for the rolling cap. Slashes on one day share a record dated by the
+    /// latest of them, so the ring spans more days than the window and never drops a slash
+    /// still inside it.
+    pub fn record_slash(&mut self, now: i64, amount: u64) {
+        if let Some(r) = self.slashes.iter_mut().filter(|r| r.amount > 0).max_by_key(|r| r.at) {
+            if r.at.div_euclid(DAY) == now.div_euclid(DAY) {
+                r.at = now;
+                r.amount = r.amount.saturating_add(amount);
+                return;
+            }
+        }
+        let slot = (0..SLASH_RECORDS).min_by_key(|&i| (self.slashes[i].amount > 0, self.slashes[i].at)).unwrap();
+        self.slashes[slot] = SlashRecord { at: now, amount };
     }
 }
 
@@ -513,18 +576,59 @@ impl AequaStake {
     }
 }
 
+/// The buyback's price reference: observations of the designated pool's price, from which
+/// the program takes a time-weighted average.
+#[account]
+#[derive(InitSpace)]
+pub struct Twap {
+    pub pool: Pubkey,
+    /// Ring of (time, cumulative price × seconds) samples; prices in quote units per AEQUA at 1e12.
+    pub at: [i64; 64],
+    pub cumulative: [u128; 64],
+    pub last_price: u128,
+    pub head: u8,
+    pub count: u8,
+    pub bump: u8,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::SLASH_WINDOW_SECS;
 
     fn pool() -> AequaPool {
         AequaPool {
             base: 0,
             stream: Vesting::default(),
             total_shares: 0,
+            usdq_spent: 0,
+            aequa_bought: 0,
+            aequa_burned: 0,
+            aequa_streamed: 0,
+            buybacks: 0,
+            buyback_bucket: Bucket::default(),
+            slashes: [SlashRecord::default(); SLASH_RECORDS],
+            slashed_total: 0,
+            slash_sold_total: 0,
+            slash_usdq_burned: 0,
+            slash_bucket: Bucket::default(),
             bump: 0,
             _reserved: [0; 48],
         }
+    }
+
+    #[test]
+    fn slashes_on_one_day_share_a_record_and_the_window_keeps_them_all() {
+        let mut p = pool();
+        // Twelve covers a day for thirty days: far more than the ring's slots.
+        for day in 0..30 {
+            for k in 0..12 {
+                p.record_slash(day * DAY + k * 3_600, 1);
+            }
+        }
+        let now = 29 * DAY + 11 * 3_600;
+        assert_eq!(p.slashed_since(now, SLASH_WINDOW_SECS), 360);
+        assert_eq!(p.slashes.iter().filter(|r| r.amount > 0).count(), 30);
     }
 
     #[test]

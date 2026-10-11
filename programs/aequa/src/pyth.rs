@@ -226,6 +226,13 @@ impl Update {
         require!(carried <= freshness_secs as u64 * 1_000_000, AequaError::CollateralNotLive);
         Ok(Price { price_e8: math::price_e8(f.price, f.exponent)?, session: f.session as u8 })
     }
+
+    /// A feed's latest price whatever the session (a dollar quote asset's own feed).
+    pub fn any_price(&self, feed: u32) -> Result<u64> {
+        let f = self.feeds.iter().find(|f| f.id == feed).ok_or(AequaError::CollateralNotLive)?;
+        require!(f.has_price && f.has_exponent, AequaError::InvalidPythPrice);
+        math::price_e8(f.price, f.exponent)
+    }
 }
 
 #[cfg(test)]

@@ -47,7 +47,14 @@ impl Params {
             protocol_share_bps: 1_000,
             reserve_fund_target_bps: 200,
             susdq_cooldown_secs: 7 * DAY as u32,
+            buyback_max_chunk: 5_000_000_000,
+            buyback_twap_bound_bps: 100,
+            buyback_burn_bps: 5_000,
+            aequa_stream_secs: 7 * DAY as u32,
             aequa_cooldown_secs: 10 * DAY as u32,
+            slash_cap_bps: 3_000,
+            deficit_hold: 3,
+            slash_twap_bound_bps: 500,
             ca_window_before_secs: 24 * HOUR as u32,
             ca_window_after_secs: HOUR as u32,
         }
@@ -87,7 +94,14 @@ impl Params {
         within(self.protocol_share_bps, 500, 2_000)?;
         within(self.reserve_fund_target_bps, 100, 500)?;
         within(self.susdq_cooldown_secs as i64, 3 * DAY, 14 * DAY)?;
+        within(self.buyback_max_chunk, 1_000_000_000, 50_000_000_000)?;
+        within(self.buyback_twap_bound_bps, 50, 300)?;
+        within(self.buyback_burn_bps, 2_500, 10_000)?;
+        within(self.aequa_stream_secs as i64, DAY, 14 * DAY)?;
         within(self.aequa_cooldown_secs as i64, 7 * DAY, 21 * DAY)?;
+        within(self.slash_cap_bps, 1_000, 3_000)?;
+        within(self.deficit_hold, 2, 9)?;
+        within(self.slash_twap_bound_bps, 200, 1_000)?;
         within(self.ca_window_before_secs as i64, 0, 72 * HOUR)?;
         within(self.ca_window_after_secs as i64, 0, 24 * HOUR)?;
 

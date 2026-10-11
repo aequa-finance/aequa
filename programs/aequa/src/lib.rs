@@ -138,10 +138,22 @@ pub mod aequa {
         ctx.accounts.run(&message, ed25519_index, ctx.remaining_accounts)
     }
 
+    pub fn cover_deficit(ctx: Context<CoverDeficit>, message: Vec<u8>, ed25519_index: u16) -> Result<()> {
+        ctx.accounts.run(&message, ed25519_index)
+    }
+
+    pub fn buyback<'info>(ctx: Context<'info, Buyback<'info>>, message: Vec<u8>, ed25519_index: u16, amount: u64, route: Vec<u8>) -> Result<()> {
+        ctx.accounts.run(&message, ed25519_index, amount, &route, ctx.remaining_accounts)
+    }
+
+    pub fn sell_slashed<'info>(ctx: Context<'info, SellSlashed<'info>>, message: Vec<u8>, ed25519_index: u16, amount: u64, route: Vec<u8>) -> Result<()> {
+        ctx.accounts.run(&message, ed25519_index, amount, &route, ctx.remaining_accounts)
+    }
+
     // AEQUA and stAEQUA
 
-    pub fn set_aequa(ctx: Context<SetAequa>) -> Result<()> {
-        ctx.accounts.run(&ctx.bumps)
+    pub fn set_aequa(ctx: Context<SetAequa>, args: AequaArgs) -> Result<()> {
+        ctx.accounts.run(args, &ctx.bumps)
     }
 
     pub fn stake_aequa(ctx: Context<StakeAequa>, amount: u64, min_shares: u64) -> Result<()> {
@@ -154,6 +166,10 @@ pub mod aequa {
     }
 
     pub fn withdraw_aequa(ctx: Context<WithdrawAequa>) -> Result<()> {
+        ctx.accounts.run()
+    }
+
+    pub fn observe_pool(ctx: Context<ObservePool>) -> Result<()> {
         ctx.accounts.run()
     }
 

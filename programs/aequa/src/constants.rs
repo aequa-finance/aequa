@@ -17,6 +17,10 @@ pub const MAX_COLLATERALS: usize = 8;
 /// A stAEQUA position may withdraw during this window after its cooldown.
 pub const AEQUA_WINDOW_SECS: i64 = 2 * DAY;
 
+/// Slash records kept for the rolling 30-day cap.
+pub const SLASH_WINDOW_SECS: i64 = 30 * DAY;
+pub const SLASH_RECORDS: usize = 32;
+
 /// The bridge route's fixed parts: Circle's CCTP V2 programs, HyperEVM's domain and
 /// Circle's CctpForwarder there. The admin names only the HyperCore account.
 pub mod cctp {
@@ -52,9 +56,11 @@ pub mod seeds {
     pub const AEQUA_POOL: &[u8] = b"aequa_pool";
     pub const AEQUA_POOL_VAULT: &[u8] = b"aequa_pool_vault";
     pub const AEQUA_STAKE: &[u8] = b"aequa_stake";
+    pub const SLASH_SALE: &[u8] = b"slash_sale";
     /// Owns the transit accounts (its associated token accounts) that every Jupiter swap
     /// passes through; they are empty outside the instruction.
     pub const SWAP_AUTHORITY: &[u8] = b"swap_authority";
+    pub const TWAP: &[u8] = b"twap";
     pub const VOTER_WEIGHT: &[u8] = b"voter-weight-record";
     pub const MAX_VOTER_WEIGHT: &[u8] = b"max-voter-weight-record";
 }
