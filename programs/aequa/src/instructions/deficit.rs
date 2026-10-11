@@ -34,12 +34,12 @@ pub fn aequa_price_usd<'info>(config: &Config, twap: &Twap, pyth: &PythPro<'info
     Ok(avg * quote_e8 as u128 / 100_000_000)
 }
 
-/// AEQUA base units worth `usd` (6 decimals) at `price_usd_e12`.
+/// AEQUA base units worth `usd` (6 decimals) at `price_usd_e12`, rounded up.
 pub fn aequa_for_usd(usd: u64, price_usd_e12: u128, decimals: u8) -> Result<u64> {
     require!(price_usd_e12 > 0, AequaError::TwapNotReady);
     let n = U256::from(usd) * U256::from(10u64).pow(U256::from(decimals as u32)) * U256::from(1_000_000_000_000u64);
     let d = U256::from(price_usd_e12) * U256::from(1_000_000u64);
-    let v = n / d;
+    let v = (n + d - U256::from(1u8)) / d;
     require!(v <= U256::from(u64::MAX), AequaError::MathOverflow);
     Ok(v.as_u64())
 }
@@ -152,8 +152,9 @@ mod tests {
     use super::aequa_for_usd;
 
     #[test]
-    fn aequa_for_dollars() {
+    fn aequa_for_dollars_rounds_up() {
         // $1,000 at $0.00005 per AEQUA (6 dp): 20,000,000 AEQUA.
         assert_eq!(aequa_for_usd(1_000_000_000, 50_000_000, 6).unwrap(), 20_000_000_000_000);
+        assert_eq!(aequa_for_usd(1, 3_000_000_000_000, 6).unwrap(), 1);
     }
 }

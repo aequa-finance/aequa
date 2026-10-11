@@ -33,11 +33,11 @@ fn fill_price(usd: u64, aequa: u64, decimals: u8) -> Result<u128> {
     Ok(v.as_u128())
 }
 
-/// Dollars (6 decimals) of `aequa` base units at `price_e12` dollars per whole AEQUA.
+/// Dollars (6 decimals) of `aequa` base units at `price_e12` dollars per whole AEQUA, rounded up.
 fn usd_at(aequa: u64, price_e12: u128, decimals: u8) -> Result<u64> {
     let n = U256::from(aequa) * U256::from(price_e12) * U256::from(1_000_000u64);
     let d = U256::from(10u64).pow(U256::from(decimals as u32)) * U256::from(1_000_000_000_000u64);
-    let v = n / d;
+    let v = (n + d - U256::from(1u8)) / d;
     require!(v <= U256::from(u64::MAX), AequaError::MathOverflow);
     Ok(v.as_u64())
 }
@@ -298,6 +298,13 @@ impl<'info> SellSlashed<'info> {
 #[cfg(test)]
 mod tests {
     use super::fill_price;
+
+    #[test]
+    fn dollars_at_a_price_round_up() {
+        // 100M AEQUA (6 dp) at $0.00005: $5,000.
+        assert_eq!(super::usd_at(100_000_000_000_000, 50_000_000, 6).unwrap(), 5_000_000_000);
+        assert_eq!(super::usd_at(1, 50_000_000, 6).unwrap(), 1);
+    }
 
     #[test]
     fn fill_prices() {
