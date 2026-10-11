@@ -19,6 +19,7 @@ use anchor_spl::{
 
 use crate::constants::{seeds::*, BPS};
 use crate::errors::AequaError;
+use crate::events::{BoughtBack, SlashSold};
 use crate::instructions::deficit::aequa_price_usd;
 use crate::instructions::pyth_pro::*;
 use crate::jupiter;
@@ -188,6 +189,7 @@ impl<'info> Buyback<'info> {
         pool.aequa_burned = pool.aequa_burned.saturating_add(burned);
         pool.aequa_streamed = pool.aequa_streamed.saturating_add(streamed);
         pool.buybacks += 1;
+        emit!(BoughtBack { usdq_in: amount, aequa_out: bought, burned, streamed, twap_e12: twap });
         Ok(())
     }
 }
@@ -291,6 +293,7 @@ impl<'info> SellSlashed<'info> {
         let pool = &mut self.aequa_pool;
         pool.slash_sold_total = pool.slash_sold_total.saturating_add(amount);
         pool.slash_usdq_burned = pool.slash_usdq_burned.saturating_add(cover);
+        emit!(SlashSold { aequa_in: amount, usdq_out: raised, burned: cover, to_reserve_fund: excess });
         Ok(())
     }
 }

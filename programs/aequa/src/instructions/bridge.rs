@@ -12,6 +12,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::{seeds::*, BPS};
 use crate::errors::AequaError;
+use crate::events::BridgedOut;
 use crate::state::{path, Config, Reserve};
 
 /// `sha256("global:deposit_for_burn_with_hook")[..8]`.
@@ -138,6 +139,7 @@ impl BridgeOut<'_> {
         // when it forwards; the reporter's credited total counts the same.
         let reserve = &mut self.reserve;
         reserve.bridged_out_total = reserve.bridged_out_total.checked_add(amount - max_fee).ok_or(AequaError::MathOverflow)?;
+        emit!(BridgedOut { amount, bridged_out_total: reserve.bridged_out_total, message: self.message_sent_event_data.key() });
         Ok(())
     }
 }

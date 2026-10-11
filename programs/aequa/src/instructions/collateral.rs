@@ -11,6 +11,7 @@ use anchor_spl::{
 
 use crate::constants::seeds::*;
 use crate::errors::AequaError;
+use crate::events::{Minted, Redeemed, TO_PROTOCOL, TO_RESERVE_FUND};
 use crate::instructions::common::{fee_bps, fee_to_reserve_fund};
 use crate::math;
 use crate::instructions::pyth_pro::*;
@@ -127,6 +128,17 @@ impl MintWithCollateral<'_> {
                 fee,
             )?;
         }
+        emit!(Minted {
+            user: self.user.key(),
+            asset: self.mint.key(),
+            amount_in: amount,
+            usdq_out: out,
+            fee,
+            fee_to: if to_fund { TO_RESERVE_FUND } else { TO_PROTOCOL },
+            fee_bps,
+            price_e8: price.price_e8,
+            session: price.session,
+        });
         Ok(())
     }
 }
@@ -226,6 +238,17 @@ impl RedeemForCollateral<'_> {
             raw,
             view.decimals,
         )?;
+        emit!(Redeemed {
+            user: self.user.key(),
+            asset: mint_key,
+            usdq_in: amount,
+            amount_out: raw,
+            fee,
+            fee_to: if to_fund { TO_RESERVE_FUND } else { TO_PROTOCOL },
+            fee_bps,
+            price_e8: price.price_e8,
+            session: price.session,
+        });
         Ok(())
     }
 }

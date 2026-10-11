@@ -6,6 +6,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::seeds::*;
 use crate::errors::AequaError;
+use crate::events::{ParamsChanged, PathsPaused};
 use crate::state::{path, AequaPool, Bucket, Bumps, BridgeRoute, Collateral, Config, Params, Reserve, UsdqVault};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -183,6 +184,7 @@ impl AdminOnly<'_> {
         config.usdc_bucket.settle(old_cap, now);
         config.usdc_bucket.available = config.usdc_bucket.available.min(params.usdc_hourly_cap);
         config.params = params;
+        emit!(ParamsChanged { by: self.admin.key() });
         Ok(())
     }
 
@@ -193,6 +195,7 @@ impl AdminOnly<'_> {
         config.keeper = keeper;
         config.reporter = reporter;
         config.pending_admin = pending_admin;
+        emit!(ParamsChanged { by: self.admin.key() });
         Ok(())
     }
 
@@ -203,11 +206,13 @@ impl AdminOnly<'_> {
         // forwarding fee about $0.25.
         require!(args.max_fee_bps <= 10 && args.max_fee_flat <= 5_000_000, AequaError::ParamOutOfRange);
         self.config.bridge = BridgeRoute::to_hypercore(args.recipient, args.max_fee_bps, args.max_fee_flat);
+        emit!(ParamsChanged { by: self.admin.key() });
         Ok(())
     }
 
     pub fn unpause(&mut self, paths: u32) -> Result<()> {
         self.config.paused &= !paths;
+        emit!(PathsPaused { by: self.admin.key(), paused: self.config.paused, collateral: None });
         Ok(())
     }
 }
@@ -223,6 +228,7 @@ impl AcceptAdmin<'_> {
     pub fn run(&mut self) -> Result<()> {
         self.config.admin = self.pending_admin.key();
         self.config.pending_admin = Pubkey::default();
+        emit!(ParamsChanged { by: self.pending_admin.key() });
         Ok(())
     }
 }
@@ -241,9 +247,12 @@ pub struct Pause<'info> {
 impl Pause<'_> {
     pub fn run(&mut self, paths: u32) -> Result<()> {
         self.config.paused |= paths & path::ALL;
+        let mut which = None;
         if let Some(c) = self.collateral.as_mut() {
             c.paused = true;
+            which = Some(c.mint);
         }
+        emit!(PathsPaused { by: self.signer.key(), paused: self.config.paused, collateral: which });
         Ok(())
     }
 }
@@ -260,6 +269,7 @@ pub struct UnpauseCollateral<'info> {
 impl UnpauseCollateral<'_> {
     pub fn run(&mut self) -> Result<()> {
         self.collateral.paused = false;
+        emit!(PathsPaused { by: self.admin.key(), paused: self.config.paused, collateral: Some(self.collateral.mint) });
         Ok(())
     }
 }

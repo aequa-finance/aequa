@@ -12,6 +12,7 @@ use anchor_spl::{
 
 use crate::constants::{seeds::*, BPS, SLASH_WINDOW_SECS};
 use crate::errors::AequaError;
+use crate::events::DeficitCovered;
 use crate::instructions::pyth_pro::*;
 use crate::math::U256;
 use crate::state::{path, AequaPool, Config, Reserve, Twap};
@@ -104,6 +105,7 @@ impl CoverDeficit<'_> {
         let deficit = self.reserve.deficit;
         if deficit == 0 {
             self.reserve.last_cover = now;
+            emit!(DeficitCovered { fund_burned, aequa: 0, deficit: 0 });
             return Ok(());
         }
 
@@ -143,6 +145,7 @@ impl CoverDeficit<'_> {
             self.mint.decimals,
         )?;
         self.reserve.last_cover = now;
+        emit!(DeficitCovered { fund_burned, aequa: amount, deficit });
         Ok(())
     }
 }

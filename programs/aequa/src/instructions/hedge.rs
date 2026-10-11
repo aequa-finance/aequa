@@ -6,6 +6,7 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, TransferChecked};
 
 use crate::constants::{seeds::*, MAX_COLLATERALS};
 use crate::errors::AequaError;
+use crate::events::{HedgeReported, Landed};
 use crate::signer;
 use crate::state::{path, Config, HedgeReport, Reserve};
 
@@ -50,6 +51,13 @@ impl ReportHedge<'_> {
             hl_time: args.hl_time,
             reported_at: now,
         };
+        emit!(HedgeReported {
+            account_value: args.account_value,
+            market_live: args.market_live & live_mask,
+            credited_total: args.credited_total,
+            withdrawn_total: args.withdrawn_total,
+            hl_time: args.hl_time,
+        });
         Ok(())
     }
 }
@@ -94,6 +102,7 @@ impl LandUsdc<'_> {
         )?;
         let reserve = &mut self.reserve;
         reserve.landed_total = reserve.landed_total.checked_add(amount).ok_or(AequaError::MathOverflow)?;
+        emit!(Landed { amount, landed_total: reserve.landed_total });
         Ok(())
     }
 }

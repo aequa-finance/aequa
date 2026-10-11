@@ -11,8 +11,9 @@ use anchor_spl::{
     token_interface::TokenAccount as XAccount,
 };
 
-use crate::constants::{seeds::*, BPS, DAY};
+use crate::constants::{seeds::*, BPS, DAY, MULT_ONE};
 use crate::errors::AequaError;
+use crate::events::Distributed;
 use crate::instructions::pyth_pro::*;
 use crate::math;
 use crate::state::{path, Collateral, Config, Reserve, UsdqVault};
@@ -95,7 +96,7 @@ impl<'info> Distribute<'info> {
         let floor = supply as i128 + (supply as i128 * p.cushion_bps as i128 / BPS as i128);
         let elapsed = now - reserve.last_distribution;
 
-        let (mut amount, mut burned) = (0u64, 0u64);
+        let (mut amount, mut to_susdq, mut to_fund, mut to_protocol, mut burned) = (0u64, 0u64, 0u64, 0u64, 0u64);
         let mut deficit = 0u64;
         let mut streak = reserve.deficit_streak;
         let config_bump = [config.bumps.config];
@@ -108,7 +109,7 @@ impl<'info> Distribute<'info> {
             amount = surplus.min(cap).min(u64::MAX as u128) as u64;
             let target = config.reserve_fund_target(supply.saturating_add(amount));
             let room = target.saturating_sub(self.reserve_fund.amount);
-            let (to_susdq, to_fund, to_protocol) = split(amount, p.reserve_fund_share_bps, p.protocol_share_bps, room, self.susdq_mint.supply > 0);
+            (to_susdq, to_fund, to_protocol) = split(amount, p.reserve_fund_share_bps, p.protocol_share_bps, room, self.susdq_mint.supply > 0);
             for (to, part) in [
                 (self.susdq_assets.to_account_info(), to_susdq),
                 (self.reserve_fund.to_account_info(), to_fund),
@@ -157,6 +158,23 @@ impl<'info> Distribute<'info> {
         reserve.distributions += 1;
         reserve.distributed_total = reserve.distributed_total.saturating_add(amount);
         reserve.deficit_burned_total = reserve.deficit_burned_total.saturating_add(burned);
+
+        let shares = self.susdq_mint.supply;
+        let assets = self.usdq_vault.total_assets(now);
+        let rate = if shares == 0 { MULT_ONE } else { assets as u128 * MULT_ONE / shares as u128 };
+        emit!(Distributed {
+            nav: reserve.last_nav,
+            supply,
+            surplus: (nav - floor).clamp(i64::MIN as i128, i64::MAX as i128) as i64,
+            amount,
+            to_susdq,
+            to_reserve_fund: to_fund,
+            to_protocol,
+            burned,
+            deficit_streak: streak,
+            susdq_rate_e12: rate,
+            at: now,
+        });
         Ok(())
     }
 }

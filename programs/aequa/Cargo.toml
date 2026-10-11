@@ -20,7 +20,7 @@ custom-panic = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
-anchor-lang = { version = "=1.2.1", default-features = false, features = ["solana-v4", "init-if-needed"] }
+anchor-lang = { version = "=1.2.1", default-features = false, features = ["solana-v4", "init-if-needed", "event-cpi"] }
 anchor-spl = { version = "=1.2.1", default-features = false, features = ["solana-v4", "token", "token_2022", "token_2022_extensions", "associated_token"] }
 uint = { version = "0.10", default-features = false }
 

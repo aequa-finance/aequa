@@ -10,6 +10,7 @@ use anchor_spl::{
 
 use crate::constants::{seeds::*, AEQUA_WINDOW_SECS};
 use crate::errors::AequaError;
+use crate::events::{AequaStaked, AequaUnstakeStarted, AequaWithdrawn, ParamsChanged};
 use crate::math;
 use crate::signer;
 use crate::state::{path, AequaPool, AequaSetup, AequaStake, Config, StakeState, Twap};
@@ -111,6 +112,7 @@ impl SetAequa<'_> {
             twap.last_price = 0;
         }
         twap.bump = bumps.twap;
+        emit!(ParamsChanged { by: self.admin.key() });
         Ok(())
     }
 }
@@ -183,6 +185,7 @@ impl StakeAequa<'_> {
         stake.shares += shares;
         // A position whose window passed is active again; staking more clears the old start.
         stake.cooldown_start = 0;
+        emit!(AequaStaked { user: self.user.key(), aequa: amount, shares });
         Ok(())
     }
 }
@@ -210,6 +213,12 @@ impl StartAequaUnstake<'_> {
             StakeState::Active => {}
         }
         stake.cooldown_start = now;
+        emit!(AequaUnstakeStarted {
+            user: self.user.key(),
+            shares: stake.shares,
+            window_opens: now + cooldown,
+            window_closes: now + cooldown + AEQUA_WINDOW_SECS,
+        });
         Ok(())
     }
 }
@@ -265,6 +274,7 @@ impl WithdrawAequa<'_> {
                 self.mint.decimals,
             )?;
         }
+        emit!(AequaWithdrawn { user: self.user.key(), aequa: amount, shares: stake.shares });
         Ok(())
     }
 }

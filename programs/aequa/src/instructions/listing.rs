@@ -6,6 +6,7 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{seeds::*, MAX_COLLATERALS};
 use crate::errors::AequaError;
+use crate::events::ParamsChanged;
 use crate::params::{check_bands, check_cap_change, LAUNCH_SPOT_CAP, LAUNCH_XSTOCK_HOURLY_CAP};
 use crate::state::{Bucket, Collateral, Config};
 use crate::token2022::read_mint;
@@ -89,6 +90,7 @@ impl AddCollateral<'_> {
         config.collaterals[count] = self.mint.key();
         config.collateral_count += 1;
         config.spot_cap_total = config.spot_cap_total.checked_add(args.spot_cap).ok_or(AequaError::MathOverflow)?;
+        emit!(ParamsChanged { by: self.admin.key() });
         Ok(())
     }
 }
@@ -126,6 +128,7 @@ impl SetCollateral<'_> {
         c.hourly_cap = args.hourly_cap;
         c.perp = args.perp;
         c.perp_asset = args.perp_asset;
+        emit!(ParamsChanged { by: self.admin.key() });
         Ok(())
     }
 }

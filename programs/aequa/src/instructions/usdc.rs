@@ -6,6 +6,7 @@ use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer,
 
 use crate::constants::seeds::*;
 use crate::errors::AequaError;
+use crate::events::{Minted, Redeemed, TO_PROTOCOL, TO_RESERVE_FUND};
 use crate::instructions::common::{fee_bps, fee_to_reserve_fund};
 use crate::math;
 use crate::signer;
@@ -87,6 +88,17 @@ impl MintWithUsdc<'_> {
                 fee,
             )?;
         }
+        emit!(Minted {
+            user: self.user.key(),
+            asset: self.usdc_mint.key(),
+            amount_in: amount,
+            usdq_out: out,
+            fee,
+            fee_to: if to_fund { TO_RESERVE_FUND } else { TO_PROTOCOL },
+            fee_bps,
+            price_e8: 0,
+            session: 0,
+        });
         Ok(())
     }
 }
@@ -163,6 +175,17 @@ impl RedeemForUsdc<'_> {
             out,
             6,
         )?;
+        emit!(Redeemed {
+            user: self.user.key(),
+            asset: self.usdc_mint.key(),
+            usdq_in: amount,
+            amount_out: out,
+            fee,
+            fee_to: if to_fund { TO_RESERVE_FUND } else { TO_PROTOCOL },
+            fee_bps,
+            price_e8: 0,
+            session: 0,
+        });
         Ok(())
     }
 }

@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-/// Every refusal has a name.
+/// Every refusal has a name, so a client can turn each into a sentence.
 #[error_code]
 pub enum AequaError {
     // Amounts and balances

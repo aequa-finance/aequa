@@ -12,6 +12,7 @@ use anchor_spl::{
 
 use crate::constants::{seeds::*, BPS};
 use crate::errors::AequaError;
+use crate::events::Swapped;
 use crate::instructions::pyth_pro::*;
 use crate::jupiter;
 use crate::math;
@@ -158,6 +159,7 @@ impl<'info> Swap<'info> {
                 6,
             )?;
         }
+        emit!(Swapped { collateral: mint_key, buy, amount_in, amount_out: received, min_out, price_e8: price.price_e8 });
         Ok(())
     }
 }

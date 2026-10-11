@@ -6,6 +6,7 @@ use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, TransferC
 
 use crate::constants::seeds::*;
 use crate::errors::AequaError;
+use crate::events::{UsdqClaimed, UsdqCooldownStarted, UsdqStaked};
 use crate::math;
 use crate::signer;
 use crate::state::{path, Config, UsdqCooldown, UsdqVault};
@@ -64,6 +65,7 @@ impl StakeUsdq<'_> {
             ),
             shares,
         )?;
+        emit!(UsdqStaked { user: self.user.key(), usdq: amount, shares });
         Ok(())
     }
 }
@@ -142,6 +144,7 @@ impl StartUsdqCooldown<'_> {
         cooldown.bump = bump;
         cooldown.amount = cooldown.amount.checked_add(usdq).ok_or(AequaError::MathOverflow)?;
         cooldown.unlock_at = now + config.params.susdq_cooldown_secs as i64;
+        emit!(UsdqCooldownStarted { user: self.user.key(), shares, usdq, cooling: cooldown.amount, unlock_at: cooldown.unlock_at });
         Ok(())
     }
 }
@@ -190,6 +193,7 @@ impl ClaimUsdq<'_> {
             amount,
             6,
         )?;
+        emit!(UsdqClaimed { user: self.user.key(), usdq: amount });
         Ok(())
     }
 }
