@@ -88,7 +88,7 @@ impl MintWithCollateral<'_> {
         let spot = math::xstock_value(self.vault.amount, view.multiplier_e12, price.price_e8, view.decimals)?;
         require!(spot.saturating_add(value) <= c.spot_cap, AequaError::SpotCapExceeded);
         let cap = c.hourly_cap;
-        c.mint_bucket.take(value, cap, now)?;
+        c.mint_bucket.draw(value, cap, now)?;
 
         let fee_bps = fee_bps(config, self.aequa_stake.as_ref().map(|a| &***a), self.aequa_pool.as_ref().map(|a| a.as_ref()), &self.user.key(), now)?;
         let (out, fee) = math::after_fee(value, fee_bps);
@@ -190,7 +190,7 @@ impl RedeemForCollateral<'_> {
         require!(raw <= self.vault.amount, AequaError::VaultInsufficient);
         require!(raw >= min_out, AequaError::SlippageExceeded);
         let cap = c.hourly_cap;
-        c.redeem_bucket.take(amount, cap, now)?;
+        c.redeem_bucket.draw(amount, cap, now)?;
         let supply = self.usdq_mint.supply - net;
         let to_fund = fee_to_reserve_fund(config, self.reserve_fund.amount, supply);
 

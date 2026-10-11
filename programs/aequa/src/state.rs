@@ -94,7 +94,7 @@ impl Bucket {
     }
 
     /// Takes `amount` from the bucket or fails with `CapacityExceeded`.
-    pub fn take(&mut self, amount: u64, cap: u64, now: i64) -> Result<()> {
+    pub fn draw(&mut self, amount: u64, cap: u64, now: i64) -> Result<()> {
         let level = self.level(cap, now);
         require!(amount <= level, AequaError::CapacityExceeded);
         self.available = level - amount;

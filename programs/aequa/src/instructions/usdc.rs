@@ -48,7 +48,7 @@ impl MintWithUsdc<'_> {
         let supply = self.usdq_mint.supply.checked_add(amount).ok_or(AequaError::MathOverflow)?;
         require!(supply <= config.supply_cap(), AequaError::SupplyCapExceeded);
         let cap = config.params.usdc_hourly_cap;
-        config.usdc_bucket.take(amount, cap, now)?;
+        config.usdc_bucket.draw(amount, cap, now)?;
 
         let fee_bps = fee_bps(config, self.aequa_stake.as_ref().map(|a| &***a), self.aequa_pool.as_ref().map(|a| a.as_ref()), &self.user.key(), now)?;
         let (out, fee) = math::after_fee(amount, fee_bps);
