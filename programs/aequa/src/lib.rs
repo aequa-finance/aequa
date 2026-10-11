@@ -137,4 +137,41 @@ pub mod aequa {
     pub fn distribute<'info>(ctx: Context<'info, Distribute<'info>>, message: Vec<u8>, ed25519_index: u16) -> Result<()> {
         ctx.accounts.run(&message, ed25519_index, ctx.remaining_accounts)
     }
+
+    // AEQUA and stAEQUA
+
+    pub fn set_aequa(ctx: Context<SetAequa>) -> Result<()> {
+        ctx.accounts.run(&ctx.bumps)
+    }
+
+    pub fn stake_aequa(ctx: Context<StakeAequa>, amount: u64, min_shares: u64) -> Result<()> {
+        let bump = ctx.bumps.aequa_stake;
+        ctx.accounts.run(amount, min_shares, bump)
+    }
+
+    pub fn start_aequa_unstake(ctx: Context<StartAequaUnstake>) -> Result<()> {
+        ctx.accounts.run()
+    }
+
+    pub fn withdraw_aequa(ctx: Context<WithdrawAequa>) -> Result<()> {
+        ctx.accounts.run()
+    }
+
+    // Governance: the Realms voter-weight plugin
+
+    pub fn create_voter_weight_record(ctx: Context<CreateVoterWeightRecord>, realm: Pubkey) -> Result<()> {
+        ctx.accounts.run(realm)
+    }
+
+    pub fn update_voter_weight_record(ctx: Context<UpdateVoterWeightRecord>, action: Option<VoterWeightAction>, target: Option<Pubkey>) -> Result<()> {
+        ctx.accounts.run(action, target)
+    }
+
+    pub fn create_max_voter_weight_record(ctx: Context<CreateMaxVoterWeightRecord>, realm: Pubkey) -> Result<()> {
+        ctx.accounts.run(realm)
+    }
+
+    pub fn update_max_voter_weight_record(ctx: Context<UpdateMaxVoterWeightRecord>) -> Result<()> {
+        ctx.accounts.run()
+    }
 }

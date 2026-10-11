@@ -47,6 +47,7 @@ impl Params {
             protocol_share_bps: 1_000,
             reserve_fund_target_bps: 200,
             susdq_cooldown_secs: 7 * DAY as u32,
+            aequa_cooldown_secs: 10 * DAY as u32,
             ca_window_before_secs: 24 * HOUR as u32,
             ca_window_after_secs: HOUR as u32,
         }
@@ -86,6 +87,7 @@ impl Params {
         within(self.protocol_share_bps, 500, 2_000)?;
         within(self.reserve_fund_target_bps, 100, 500)?;
         within(self.susdq_cooldown_secs as i64, 3 * DAY, 14 * DAY)?;
+        within(self.aequa_cooldown_secs as i64, 7 * DAY, 21 * DAY)?;
         within(self.ca_window_before_secs as i64, 0, 72 * HOUR)?;
         within(self.ca_window_after_secs as i64, 0, 24 * HOUR)?;
 

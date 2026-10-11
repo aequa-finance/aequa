@@ -9,7 +9,7 @@ use crate::errors::AequaError;
 use crate::instructions::common::{fee_bps, fee_to_reserve_fund};
 use crate::math;
 use crate::signer;
-use crate::state::{path, Config};
+use crate::state::{path, AequaStake, Config};
 
 #[derive(Accounts)]
 pub struct MintWithUsdc<'info> {
@@ -29,6 +29,11 @@ pub struct MintWithUsdc<'info> {
     pub reserve_fund: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [PROTOCOL], bump = config.bumps.protocol)]
     pub protocol: Box<Account<'info, TokenAccount>>,
+    #[account(seeds = [AEQUA_STAKE, user.key().as_ref()], bump = aequa_stake.bump)]
+    pub aequa_stake: Option<Box<Account<'info, AequaStake>>>,
+    /// CHECK: the stAEQUA pool, by its seeds; the fee tier reads its head (`PoolHead`).
+    #[account(seeds = [AEQUA_POOL], bump = config.bumps.aequa_pool)]
+    pub aequa_pool: Option<UncheckedAccount<'info>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -45,7 +50,7 @@ impl MintWithUsdc<'_> {
         let cap = config.params.usdc_hourly_cap;
         config.usdc_bucket.take(amount, cap, now)?;
 
-        let fee_bps = fee_bps(config);
+        let fee_bps = fee_bps(config, self.aequa_stake.as_ref().map(|a| &***a), self.aequa_pool.as_ref().map(|a| a.as_ref()), &self.user.key(), now)?;
         let (out, fee) = math::after_fee(amount, fee_bps);
         require!(out > 0, AequaError::ZeroAmount);
         require!(out >= min_out, AequaError::SlippageExceeded);
@@ -104,17 +109,23 @@ pub struct RedeemForUsdc<'info> {
     pub reserve_fund: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [PROTOCOL], bump = config.bumps.protocol)]
     pub protocol: Box<Account<'info, TokenAccount>>,
+    #[account(seeds = [AEQUA_STAKE, user.key().as_ref()], bump = aequa_stake.bump)]
+    pub aequa_stake: Option<Box<Account<'info, AequaStake>>>,
+    /// CHECK: the stAEQUA pool, by its seeds; the fee tier reads its head (`PoolHead`).
+    #[account(seeds = [AEQUA_POOL], bump = config.bumps.aequa_pool)]
+    pub aequa_pool: Option<UncheckedAccount<'info>>,
     pub token_program: Program<'info, Token>,
 }
 
 impl RedeemForUsdc<'_> {
     pub fn run(&mut self, amount: u64, min_out: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
         let config = &self.config;
         config.require_open(path::REDEEM_USDC)?;
         require!(amount > 0, AequaError::ZeroAmount);
         require!(self.user_usdq.amount >= amount, AequaError::InsufficientFunds);
 
-        let fee_bps = fee_bps(config);
+        let fee_bps = fee_bps(config, self.aequa_stake.as_ref().map(|a| &***a), self.aequa_pool.as_ref().map(|a| a.as_ref()), &self.user.key(), now)?;
         let (out, fee) = math::after_fee(amount, fee_bps);
         require!(out > 0, AequaError::ZeroAmount);
         require!(out <= self.buffer.amount, AequaError::BufferInsufficient);

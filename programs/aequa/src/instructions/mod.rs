@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod aequa;
 pub mod bridge;
 pub mod collateral;
 pub mod common;
@@ -10,8 +11,10 @@ pub mod pyth_pro;
 pub mod susdq;
 pub mod swap;
 pub mod usdc;
+pub mod voter;
 
 pub use admin::*;
+pub use aequa::*;
 pub use bridge::*;
 pub use collateral::*;
 pub use distribute::*;
@@ -22,3 +25,4 @@ pub use pyth_pro::*;
 pub use susdq::*;
 pub use swap::*;
 pub use usdc::*;
+pub use voter::*;

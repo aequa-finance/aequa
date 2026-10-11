@@ -6,7 +6,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::seeds::*;
 use crate::errors::AequaError;
-use crate::state::{path, Bucket, Bumps, BridgeRoute, Collateral, Config, Params, Reserve, UsdqVault};
+use crate::state::{path, AequaPool, Bucket, Bumps, BridgeRoute, Collateral, Config, Params, Reserve, UsdqVault};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct InitializeArgs {
@@ -33,6 +33,8 @@ pub struct Initialize<'info> {
     pub reserve: Box<Account<'info, Reserve>>,
     #[account(init, payer = payer, space = 8 + UsdqVault::INIT_SPACE, seeds = [SUSDQ_VAULT], bump)]
     pub usdq_vault: Box<Account<'info, UsdqVault>>,
+    #[account(init, payer = payer, space = 8 + AequaPool::INIT_SPACE, seeds = [AEQUA_POOL], bump)]
+    pub aequa_pool: Box<Account<'info, AequaPool>>,
     #[account(init, payer = payer, seeds = [USDQ_MINT], bump, mint::decimals = 6, mint::authority = config, mint::token_program = token_program)]
     pub usdq_mint: Box<Account<'info, Mint>>,
     #[account(init, payer = payer, seeds = [SUSDQ_MINT], bump, mint::decimals = 6, mint::authority = usdq_vault, mint::token_program = token_program)]
@@ -64,6 +66,7 @@ impl Initialize<'_> {
             config: bumps.config,
             reserve: bumps.reserve,
             usdq_vault: bumps.usdq_vault,
+            aequa_pool: bumps.aequa_pool,
             usdq_mint: bumps.usdq_mint,
             susdq_mint: bumps.susdq_mint,
             ..Default::default()
@@ -72,6 +75,7 @@ impl Initialize<'_> {
         self.reserve.last_distribution = now;
         self.usdq_vault.bump = bumps.usdq_vault;
         self.usdq_vault.susdq_mint = self.susdq_mint.key();
+        self.aequa_pool.bump = bumps.aequa_pool;
         Ok(())
     }
 }

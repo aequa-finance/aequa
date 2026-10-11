@@ -51,6 +51,16 @@ pub enum AequaError {
     #[msg("There is nothing to claim")]
     NothingToClaim,
 
+    // stAEQUA
+    #[msg("There is no stake to unstake")]
+    NothingStaked,
+    #[msg("The position is cooling down")]
+    PositionCooling,
+    #[msg("The withdraw window isn't open")]
+    WindowNotOpen,
+    #[msg("AEQUA has not been set up yet")]
+    AequaNotSet,
+
     // Cranks
     #[msg("Not due yet")]
     NotDue,

@@ -62,6 +62,7 @@ pub struct Params {
     pub protocol_share_bps: u16,
     pub reserve_fund_target_bps: u16,
     pub susdq_cooldown_secs: u32,
+    pub aequa_cooldown_secs: u32,
     /// The corporate-action window around a scheduled multiplier change.
     pub ca_window_before_secs: u32,
     pub ca_window_after_secs: u32,
@@ -170,6 +171,20 @@ impl BridgeRoute {
     }
 }
 
+/// The AEQUA side, set once the token exists.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq, InitSpace)]
+pub struct AequaSetup {
+    pub mint: Pubkey,
+    pub token_program: Pubkey,
+    pub decimals: u8,
+}
+
+impl AequaSetup {
+    pub fn is_set(&self) -> bool {
+        self.mint != Pubkey::default()
+    }
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct Config {
@@ -190,6 +205,7 @@ pub struct Config {
     pub collateral_count: u8,
     pub collaterals: [Pubkey; MAX_COLLATERALS],
     pub bridge: BridgeRoute,
+    pub aequa: AequaSetup,
     pub bumps: Bumps,
     /// The swap authority's USDC transit account.
     pub transit_usdc: Pubkey,
@@ -202,6 +218,7 @@ pub struct Bumps {
     pub config: u8,
     pub reserve: u8,
     pub usdq_vault: u8,
+    pub aequa_pool: u8,
     pub usdq_mint: u8,
     pub susdq_mint: u8,
     pub buffer: u8,
@@ -210,6 +227,7 @@ pub struct Bumps {
     pub susdq_silo: u8,
     pub reserve_fund: u8,
     pub protocol: u8,
+    pub aequa_pool_vault: u8,
     pub swap_authority: u8,
 }
 
@@ -226,6 +244,18 @@ impl Config {
             return 0;
         }
         ((self.spot_cap_total as u128) * 10_000 / share as u128).min(u64::MAX as u128) as u64
+    }
+
+    /// The fee for a holder whose active stAEQUA is `active`.
+    pub fn fee_bps(&self, active: u64) -> u16 {
+        let p = &self.params;
+        let mut fee = p.base_fee_bps;
+        for i in 0..2 {
+            if p.tier_stake[i] > 0 && active >= p.tier_stake[i] {
+                fee = fee.min(p.tier_fee_bps[i]);
+            }
+        }
+        fee
     }
 
     /// The Reserve Fund's target for a supply.
@@ -334,7 +364,31 @@ impl Reserve {
     }
 }
 
-/// A linear release of `amount` between `start` and `end` (sUSDq vesting).
+/// The front of `AequaPool`: what the fee tier reads. Borsh lays fields out in order, so these
+/// are the pool account's first bytes after its discriminator; reading only them keeps the
+/// paths that take the pool well inside the stack.
+#[derive(AnchorDeserialize, Clone, Copy, Debug)]
+pub struct PoolHead {
+    pub base: u64,
+    pub stream: Vesting,
+    pub total_shares: u64,
+}
+
+impl PoolHead {
+    /// The head of this program's AequaPool account.
+    pub fn read(info: &AccountInfo) -> Result<Self> {
+        require_keys_eq!(*info.owner, crate::ID, anchor_lang::error::ErrorCode::AccountOwnedByWrongProgram);
+        let data = info.try_borrow_data()?;
+        require!(data.len() >= 8 && &data[..8] == AequaPool::DISCRIMINATOR, anchor_lang::error::ErrorCode::AccountDiscriminatorMismatch);
+        Ok(Self::deserialize(&mut &data[8..])?)
+    }
+
+    pub fn assets(&self, now: i64) -> u64 {
+        self.base + self.stream.vested(now)
+    }
+}
+
+/// A linear release of `amount` between `start` and `end` (sUSDq vesting, the stAEQUA stream).
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq, InitSpace)]
 pub struct Vesting {
     pub amount: u64,
@@ -397,4 +451,91 @@ pub struct UsdqCooldown {
     pub amount: u64,
     pub unlock_at: i64,
     pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct AequaPool {
+    /// Vested AEQUA in the pool. Tokens sent straight to the vault don't count.
+    pub base: u64,
+    pub stream: Vesting,
+    pub total_shares: u64,
+    pub bump: u8,
+    pub _reserved: [u8; 48],
+}
+
+impl AequaPool {
+    pub fn assets(&self, now: i64) -> u64 {
+        self.base + self.stream.vested(now)
+    }
+
+    pub fn fold(&mut self, now: i64) {
+        self.base += self.stream.fold(now);
+    }
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct AequaStake {
+    pub owner: Pubkey,
+    pub shares: u64,
+    /// When unstaking started; zero for an active position.
+    pub cooldown_start: i64,
+    pub bump: u8,
+}
+
+/// Where a position is in its unstaking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StakeState {
+    Empty,
+    Active,
+    Cooling,
+    Window,
+}
+
+impl AequaStake {
+    pub fn state(&self, now: i64, cooldown: i64, window: i64) -> StakeState {
+        if self.shares == 0 {
+            return StakeState::Empty;
+        }
+        if self.cooldown_start == 0 {
+            return StakeState::Active;
+        }
+        let opens = self.cooldown_start + cooldown;
+        if now < opens {
+            StakeState::Cooling
+        } else if now < opens + window {
+            StakeState::Window
+        } else {
+            // The window passed: the position is active again.
+            StakeState::Active
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pool() -> AequaPool {
+        AequaPool {
+            base: 0,
+            stream: Vesting::default(),
+            total_shares: 0,
+            bump: 0,
+            _reserved: [0; 48],
+        }
+    }
+
+    #[test]
+    fn the_pool_head_reads_the_pool_account() {
+        let mut p = pool();
+        p.base = 7;
+        p.stream = Vesting { amount: 11, start: 13, end: 17 };
+        p.total_shares = 19;
+        let mut data = AequaPool::DISCRIMINATOR.to_vec();
+        p.serialize(&mut data).unwrap();
+        let head = PoolHead::deserialize(&mut &data[8..]).unwrap();
+        assert_eq!((head.base, head.stream, head.total_shares), (7, Vesting { amount: 11, start: 13, end: 17 }, 19));
+    }
 }

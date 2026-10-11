@@ -1,5 +1,6 @@
 //! The program's arithmetic. Raw u64 amounts, 256-bit
 //! intermediates where a product can pass u128, and every amount paid out rounded down.
+//! The SDK repeats each function in bigint (its src/math.ts), against these tests' vectors.
 
 use anchor_lang::prelude::*;
 
@@ -76,6 +77,15 @@ pub fn assets_for(shares: u64, total: u64, total_shares: u64) -> u64 {
         0
     } else {
         ((shares as u128) * (total as u128) / (total_shares as u128)) as u64
+    }
+}
+
+/// Assets for shares rounded up: a stake of exactly a tier threshold reaches its tier.
+pub fn assets_for_up(shares: u64, total: u64, total_shares: u64) -> u64 {
+    if total_shares == 0 {
+        0
+    } else {
+        ((shares as u128 * total as u128 + total_shares as u128 - 1) / total_shares as u128) as u64
     }
 }
 

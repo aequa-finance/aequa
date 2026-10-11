@@ -14,6 +14,9 @@ pub const MULT_ONE: u128 = 1_000_000_000_000;
 /// Collateral listings the program can hold (new collateral joins by vote).
 pub const MAX_COLLATERALS: usize = 8;
 
+/// A stAEQUA position may withdraw during this window after its cooldown.
+pub const AEQUA_WINDOW_SECS: i64 = 2 * DAY;
+
 /// The bridge route's fixed parts: Circle's CCTP V2 programs, HyperEVM's domain and
 /// Circle's CctpForwarder there. The admin names only the HyperCore account.
 pub mod cctp {
@@ -46,7 +49,12 @@ pub mod seeds {
     pub const LANDING: &[u8] = b"landing";
     pub const RESERVE_FUND: &[u8] = b"reserve_fund";
     pub const PROTOCOL: &[u8] = b"protocol";
+    pub const AEQUA_POOL: &[u8] = b"aequa_pool";
+    pub const AEQUA_POOL_VAULT: &[u8] = b"aequa_pool_vault";
+    pub const AEQUA_STAKE: &[u8] = b"aequa_stake";
     /// Owns the transit accounts (its associated token accounts) that every Jupiter swap
     /// passes through; they are empty outside the instruction.
     pub const SWAP_AUTHORITY: &[u8] = b"swap_authority";
+    pub const VOTER_WEIGHT: &[u8] = b"voter-weight-record";
+    pub const MAX_VOTER_WEIGHT: &[u8] = b"max-voter-weight-record";
 }

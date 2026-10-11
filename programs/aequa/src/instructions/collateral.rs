@@ -15,7 +15,7 @@ use crate::instructions::common::{fee_bps, fee_to_reserve_fund};
 use crate::math;
 use crate::instructions::pyth_pro::*;
 use crate::pyth::{self, Price};
-use crate::state::{path, Collateral, Config, Reserve};
+use crate::state::{path, AequaStake, Collateral, Config, Reserve};
 use crate::token2022::{read_mint, MintView};
 
 /// Everything an xStock path checks before it prices anything.
@@ -56,6 +56,11 @@ pub struct MintWithCollateral<'info> {
     /// program checks.
     #[account(mut, seeds = [PROTOCOL], bump = config.bumps.protocol)]
     pub protocol: UncheckedAccount<'info>,
+    #[account(seeds = [AEQUA_STAKE, user.key().as_ref()], bump = aequa_stake.bump)]
+    pub aequa_stake: Option<Box<Account<'info, AequaStake>>>,
+    /// CHECK: the stAEQUA pool, by its seeds; the fee tier reads its head (`PoolHead`).
+    #[account(seeds = [AEQUA_POOL], bump = config.bumps.aequa_pool)]
+    pub aequa_pool: Option<UncheckedAccount<'info>>,
     pub token_program: Program<'info, Token>,
     #[account(address = collateral.token_program)]
     pub xstock_token_program: Interface<'info, TokenInterface>,
@@ -85,7 +90,7 @@ impl MintWithCollateral<'_> {
         let cap = c.hourly_cap;
         c.mint_bucket.take(value, cap, now)?;
 
-        let fee_bps = fee_bps(config);
+        let fee_bps = fee_bps(config, self.aequa_stake.as_ref().map(|a| &***a), self.aequa_pool.as_ref().map(|a| a.as_ref()), &self.user.key(), now)?;
         let (out, fee) = math::after_fee(value, fee_bps);
         require!(out > 0, AequaError::ZeroAmount);
         require!(out >= min_out, AequaError::SlippageExceeded);
@@ -153,6 +158,11 @@ pub struct RedeemForCollateral<'info> {
     /// program checks.
     #[account(mut, seeds = [PROTOCOL], bump = config.bumps.protocol)]
     pub protocol: UncheckedAccount<'info>,
+    #[account(seeds = [AEQUA_STAKE, user.key().as_ref()], bump = aequa_stake.bump)]
+    pub aequa_stake: Option<Box<Account<'info, AequaStake>>>,
+    /// CHECK: the stAEQUA pool, by its seeds; the fee tier reads its head (`PoolHead`).
+    #[account(seeds = [AEQUA_POOL], bump = config.bumps.aequa_pool)]
+    pub aequa_pool: Option<UncheckedAccount<'info>>,
     pub token_program: Program<'info, Token>,
     #[account(address = collateral.token_program)]
     pub xstock_token_program: Interface<'info, TokenInterface>,
@@ -173,7 +183,7 @@ impl RedeemForCollateral<'_> {
         let c = &mut self.collateral;
         let band = c.bands_bps[price.session as usize];
 
-        let fee_bps = fee_bps(config);
+        let fee_bps = fee_bps(config, self.aequa_stake.as_ref().map(|a| &***a), self.aequa_pool.as_ref().map(|a| a.as_ref()), &self.user.key(), now)?;
         let (net, fee) = math::after_fee(amount, fee_bps);
         let raw = math::usd_to_xstock(net, view.multiplier_e12, price.price_e8, band, view.decimals)?;
         require!(raw > 0, AequaError::ZeroAmount);
