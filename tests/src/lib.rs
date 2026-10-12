@@ -35,6 +35,7 @@ pub const SPYX: Pubkey = Pubkey::from_str_const("XsoCS1TfEyfFhfvj8EtZ528L3CaKBDB
 pub const QQQX: Pubkey = Pubkey::from_str_const("Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ");
 
 pub const USD: u64 = 1_000_000;
+pub use aequa::instructions::BridgeArgs;
 pub const DAY: i64 = 86_400;
 /// Thursday 2026-10-08 15:00 UTC: 11:00 in New York, the regular session.
 pub const START: i64 = 1_791_471_600;
@@ -130,6 +131,18 @@ impl Default for Pdas {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// AEQUA's mint, the pool it is priced in, and the program's AEQUA accounts.
+pub struct AequaWorld {
+    pub mint: Pubkey,
+    pub quote_mint: Pubkey,
+    pub pool: Pubkey,
+    pub pool_aequa_vault: Pubkey,
+    pub pool_quote_vault: Pubkey,
+    pub pool_vault: Pubkey,
+    pub slash_sale: Pubkey,
+    pub twap: Pubkey,
 }
 
 /// A wallet with its token accounts.
@@ -541,6 +554,124 @@ impl Env {
         self.send(&[ix(accounts, aequa::instruction::LandUsdc {})], &[caller])
     }
 
+    /// A plain SPL mint at `addr` whose authority is the issuer (stands in for AEQUA and
+    /// the pool's quote asset).
+    pub fn create_mint(&mut self, addr: Pubkey, decimals: u8) {
+        let mut data = vec![0u8; 82];
+        data[0..4].copy_from_slice(&1u32.to_le_bytes());
+        data[4..36].copy_from_slice(self.issuer.pubkey().as_ref());
+        data[44] = decimals;
+        data[45] = 1;
+        let lamports = self.svm.minimum_balance_for_rent_exemption(82);
+        self.svm.set_account(addr, Account { lamports, data, owner: TOKEN, executable: false, rent_epoch: 0 }).unwrap();
+    }
+
+    /// AEQUA set up against a constant-product pool holding `aequa` and `quote` base units.
+    pub fn setup_aequa(&mut self, aequa_mint: Pubkey, quote_mint: Pubkey, pool_aequa: u64, pool_quote: u64) -> AequaWorld {
+        let pool = Keypair::new().pubkey();
+        let pool_aequa_vault = self.create_ata(&pool, &aequa_mint, &TOKEN);
+        let pool_quote_vault = self.create_ata(&pool, &quote_mint, &TOKEN);
+        self.mint_to(&aequa_mint, &pool_aequa_vault, pool_aequa);
+        self.mint_to(&quote_mint, &pool_quote_vault, pool_quote);
+        let w = AequaWorld {
+            mint: aequa_mint,
+            quote_mint,
+            pool,
+            pool_aequa_vault,
+            pool_quote_vault,
+            pool_vault: pda(&[seeds::AEQUA_POOL_VAULT]),
+            slash_sale: pda(&[seeds::SLASH_SALE]),
+            twap: pda(&[seeds::TWAP]),
+        };
+        let accounts = aequa::accounts::SetAequa {
+            payer: self.payer.pubkey(),
+            config: self.p.config,
+            admin: self.admin.pubkey(),
+            mint: w.mint,
+            quote_mint: w.quote_mint,
+            pool_aequa_vault: w.pool_aequa_vault,
+            pool_quote_vault: w.pool_quote_vault,
+            aequa_pool_vault: w.pool_vault,
+            slash_sale: w.slash_sale,
+            twap: w.twap,
+            swap_authority: self.p.swap_authority,
+            transit_aequa: Pdas::transit(&aequa_mint, &TOKEN),
+            token_program: TOKEN,
+            quote_token_program: TOKEN,
+            associated_token_program: ATA,
+            system_program: SYSTEM,
+        };
+        let args = aequa::instructions::AequaArgs { pool: w.pool, pool_aequa_vault: w.pool_aequa_vault, pool_quote_vault: w.pool_quote_vault, quote_feed: 0 };
+        let (payer, admin) = (clone(&self.payer), clone(&self.admin));
+        let r = self.send(&[ix(accounts, aequa::instruction::SetAequa { args })], &[&payer, &admin]);
+        assert!(r.is_ok(), "set_aequa: {}", logs_of(&r));
+        w
+    }
+
+    pub fn stake_aequa(&mut self, w: &AequaWorld, u: &Keypair, from: &Pubkey, amount: u64) -> TxResult {
+        self.stake_aequa_min(w, u, from, amount, 0)
+    }
+
+    pub fn stake_aequa_min(&mut self, w: &AequaWorld, u: &Keypair, from: &Pubkey, amount: u64, min_shares: u64) -> TxResult {
+        let accounts = aequa::accounts::StakeAequa {
+            user: u.pubkey(),
+            config: self.p.config,
+            aequa_pool: self.p.aequa_pool,
+            aequa_stake: Pdas::aequa_stake(&u.pubkey()),
+            mint: w.mint,
+            user_aequa: *from,
+            aequa_pool_vault: w.pool_vault,
+            token_program: TOKEN,
+            system_program: SYSTEM,
+        };
+        self.send(&[ix(accounts, aequa::instruction::StakeAequa { amount, min_shares })], &[u])
+    }
+
+    pub fn start_aequa_unstake(&mut self, u: &Keypair) -> TxResult {
+        let accounts = aequa::accounts::StartAequaUnstake { user: u.pubkey(), config: self.p.config, aequa_stake: Pdas::aequa_stake(&u.pubkey()) };
+        self.send(&[ix(accounts, aequa::instruction::StartAequaUnstake {})], &[u])
+    }
+
+    pub fn withdraw_aequa(&mut self, w: &AequaWorld, u: &Keypair, to: &Pubkey) -> TxResult {
+        let accounts = aequa::accounts::WithdrawAequa {
+            user: u.pubkey(),
+            config: self.p.config,
+            aequa_pool: self.p.aequa_pool,
+            aequa_stake: Pdas::aequa_stake(&u.pubkey()),
+            mint: w.mint,
+            user_aequa: *to,
+            aequa_pool_vault: w.pool_vault,
+            token_program: TOKEN,
+        };
+        self.send(&[ix(accounts, aequa::instruction::WithdrawAequa {})], &[u])
+    }
+
+    /// The keeper observes the pool.
+    pub fn observe(&mut self, w: &AequaWorld) -> TxResult {
+        let keeper = clone(&self.keeper);
+        self.observe_as(w, &keeper)
+    }
+
+    pub fn observe_as(&mut self, w: &AequaWorld, signer: &Keypair) -> TxResult {
+        let accounts = aequa::accounts::ObservePool {
+            config: self.p.config,
+            keeper: signer.pubkey(),
+            twap: w.twap,
+            pool_aequa_vault: w.pool_aequa_vault,
+            pool_quote_vault: w.pool_quote_vault,
+        };
+        self.send(&[ix(accounts, aequa::instruction::ObservePool {})], &[signer])
+    }
+
+    /// Observations every three minutes for the next 36 minutes: a full TWAP window.
+    pub fn observe_for_twap(&mut self, w: &AequaWorld) {
+        for _ in 0..12 {
+            self.warp(180);
+            let r = self.observe(w);
+            assert!(r.is_ok(), "observe: {}", logs_of(&r));
+        }
+    }
+
     fn stake_if_any(&self, owner: &Pubkey) -> Option<Pubkey> {
         let s = Pdas::aequa_stake(owner);
         self.exists(&s).then_some(s)
@@ -676,5 +807,275 @@ pub fn pyth_accounts() -> aequa::accounts::PythPro {
         pyth_treasury: PYTH_TREASURY,
         instructions: INSTRUCTIONS,
         system_program: SYSTEM,
+    }
+}
+
+static HL_CLOCK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+
+impl Env {
+    /// Lists SPYx (SPY's feed) or QQQx (QQQ's) with the launch bands and capacity.
+    pub fn list(&mut self, mint: Pubkey, spot_cap: u64) {
+        let accounts = aequa::accounts::AddCollateral {
+            payer: self.payer.pubkey(),
+            config: self.p.config,
+            admin: self.admin.pubkey(),
+            mint,
+            collateral: Pdas::collateral(&mint),
+            vault: Pdas::collateral_vault(&mint),
+            swap_authority: self.p.swap_authority,
+            transit: Pdas::transit(&mint, &TOKEN_2022),
+            token_program: TOKEN_2022,
+            system_program: SYSTEM,
+        };
+        let args = aequa::instructions::ListingArgs {
+            feed: if mint == SPYX { SPY } else { QQQ },
+            bands_bps: [5, 15, 15, 25],
+            spot_cap,
+            hourly_cap: 500_000 * USD,
+            perp: [0; 24],
+            perp_asset: 0,
+        };
+        let (payer, admin) = (clone(&self.payer), clone(&self.admin));
+        let transit = self.ata_ix(&self.p.swap_authority, &mint, &TOKEN_2022);
+        let r = self.send(&[transit, ix(accounts, aequa::instruction::AddCollateral { args })], &[&payer, &admin]);
+        assert!(r.is_ok(), "list: {}", logs_of(&r));
+    }
+
+    /// A report landing now, both perps in session unless `market_live` says otherwise.
+    pub fn report_now(&mut self, account_value: i64, credited: u64, withdrawn: u64, market_live: u8) -> TxResult {
+        let hl_time = self.now() * 1_000 + HL_CLOCK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.report(aequa::instructions::ReportArgs {
+            account_value,
+            short_notional: [0; 8],
+            market_live,
+            credited_total: credited,
+            withdrawn_total: withdrawn,
+            hl_time,
+        })
+    }
+
+    /// The remaining accounts `distribute` reads: each listed collateral, its mint and vault.
+    pub fn collateral_accounts(&self) -> Vec<AccountMeta> {
+        let c = self.config();
+        (0..c.collateral_count as usize)
+            .flat_map(|i| {
+                let mint = c.collaterals[i];
+                [
+                    AccountMeta::new_readonly(Pdas::collateral(&mint), false),
+                    AccountMeta::new_readonly(mint, false),
+                    AccountMeta::new_readonly(Pdas::collateral_vault(&mint), false),
+                ]
+            })
+            .collect()
+    }
+
+    /// An envelope with SPY and QQQ in `session`, fresh now.
+    pub fn both_feeds(&self, session: i16) -> Vec<u8> {
+        let t = self.now();
+        pyth_envelope(&self.pyth, t, 3, &[Feed::at(SPY, 665.1234, session, t), Feed::at(QQQ, 598.42, session, t)])
+    }
+
+    pub fn distribute(&mut self, caller: &Keypair, envelope: Vec<u8>) -> TxResult {
+        let accounts = aequa::accounts::Distribute {
+            caller: caller.pubkey(),
+            config: self.p.config,
+            reserve: self.p.reserve,
+            usdq_vault: self.p.usdq_vault,
+            usdq_mint: self.p.usdq_mint,
+            susdq_mint: self.p.susdq_mint,
+            susdq_assets: self.p.susdq_assets,
+            reserve_fund: self.p.reserve_fund,
+            protocol: self.p.protocol,
+            buffer: self.p.buffer,
+            token_program: TOKEN,
+            pyth: pyth_accounts(),
+        };
+        let ed = ed25519_ix(&envelope, 1);
+        let mut program_ix = ix(accounts, aequa::instruction::Distribute { message: envelope, ed25519_index: 0 });
+        program_ix.accounts.extend(self.collateral_accounts());
+        self.send(&[ed, program_ix], &[caller])
+    }
+}
+
+pub const CCTP_MT: Pubkey = Pubkey::from_str_const("CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC");
+pub const CCTP_TMM: Pubkey = Pubkey::from_str_const("CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe");
+/// Circle's CctpForwarder on HyperEVM, left-padded to 32 bytes.
+pub const CCTP_FORWARDER: [u8; 32] = {
+    let mut b = [0u8; 32];
+    let a: [u8; 20] = [0xb2, 0x1d, 0x28, 0x1d, 0xed, 0xb1, 0x7a, 0xe5, 0xb5, 0x01, 0xf6, 0xaa, 0x82, 0x56, 0xfe, 0x38, 0xc4, 0xe4, 0x57, 0x57];
+    let mut i = 0;
+    while i < 20 {
+        b[12 + i] = a[i];
+        i += 1;
+    }
+    b
+};
+
+/// CCTP's accounts for a burn from the buffer towards HyperEVM.
+pub struct Cctp {
+    pub sender_authority: Pubkey,
+    pub denylist: Pubkey,
+    pub message_transmitter: Pubkey,
+    pub token_messenger: Pubkey,
+    pub remote_token_messenger: Pubkey,
+    pub token_minter: Pubkey,
+    pub local_token: Pubkey,
+    pub event_authority: Pubkey,
+}
+
+impl Cctp {
+    pub fn for_owner(owner: &Pubkey) -> Self {
+        let tmm = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &CCTP_TMM).0;
+        Self {
+            sender_authority: tmm(&[b"sender_authority"]),
+            denylist: tmm(&[b"denylist_account", owner.as_ref()]),
+            message_transmitter: Pubkey::find_program_address(&[b"message_transmitter"], &CCTP_MT).0,
+            token_messenger: tmm(&[b"token_messenger"]),
+            remote_token_messenger: tmm(&[b"remote_token_messenger", b"19"]),
+            token_minter: tmm(&[b"token_minter"]),
+            local_token: tmm(&[b"local_token", USDC.as_ref()]),
+            event_authority: tmm(&[b"__event_authority"]),
+        }
+    }
+}
+
+/// The 56-byte hook that sends a burn on to a HyperCore account's perp balance.
+pub fn hypercore_hook(recipient: [u8; 20]) -> [u8; 56] {
+    let mut h = [0u8; 56];
+    h[..12].copy_from_slice(b"cctp-forward");
+    h[28..32].copy_from_slice(&24u32.to_be_bytes());
+    h[32..52].copy_from_slice(&recipient);
+    h
+}
+
+impl Env {
+    /// Circle's CCTP V2 programs and their mainnet state.
+    pub fn load_cctp(&mut self) {
+        self.svm.add_program_from_file(CCTP_MT, fixture("cctp_message_transmitter_v2.so")).unwrap();
+        self.svm.add_program_from_file(CCTP_TMM, fixture("cctp_token_messenger_minter_v2.so")).unwrap();
+        for (name, addr) in [
+            ("cctp_message_transmitter.json", "W1k5ijkaSTo5iA5zChNpfzcy796fLhkBxfmJuR8W8HU"),
+            ("cctp_token_messenger.json", "AawthJCGRmggpfv9MMWV6Jmo9cue4gL9wUZgRBShg58W"),
+            ("cctp_remote_token_messenger_19.json", "3WG7G3vPxz4a6bdBb9Xic2YL4QM84ru1YcVYskcweVHY"),
+            ("cctp_token_minter.json", "E1bQJ8eMMn3zmeSewW3HQ8zmJr7KR75JonbwAtWx2bux"),
+            ("cctp_local_token_usdc.json", "CRBBbuLCyrkQy4dCTHxqstSmDQv4ajBeUVb9qUdMVaP1"),
+        ] {
+            self.svm.set_account(addr.parse().unwrap(), load_account(name)).unwrap();
+        }
+    }
+
+    /// The route to the hedge account `recipient` on HyperCore.
+    pub fn set_route(&mut self, recipient: [u8; 20]) -> TxResult {
+        self.admin_ix(aequa::instruction::SetBridgeRoute { args: BridgeArgs { recipient, max_fee_bps: 1, max_fee_flat: 1_000_000 } })
+    }
+
+    pub fn bridge_out(&mut self, keeper: &Keypair, amount: u64, max_fee: u64, fast: bool) -> (TxResult, Pubkey) {
+        let event = Keypair::new();
+        let c = Cctp::for_owner(&self.p.buffer);
+        let accounts = aequa::accounts::BridgeOut {
+            keeper: keeper.pubkey(),
+            config: self.p.config,
+            reserve: self.p.reserve,
+            buffer: self.p.buffer,
+            usdc_mint: USDC,
+            message_sent_event_data: event.pubkey(),
+            sender_authority: c.sender_authority,
+            denylist: c.denylist,
+            message_transmitter: c.message_transmitter,
+            token_messenger: c.token_messenger,
+            remote_token_messenger: c.remote_token_messenger,
+            token_minter: c.token_minter,
+            local_token: c.local_token,
+            cctp_event_authority: c.event_authority,
+            message_transmitter_program: CCTP_MT,
+            token_messenger_minter_program: CCTP_TMM,
+            token_program: TOKEN,
+            system_program: SYSTEM,
+        };
+        let ix = ix(accounts, aequa::instruction::BridgeOut { amount, max_fee, fast });
+        (self.send(&[ix], &[keeper, &event]), event.pubkey())
+    }
+}
+
+/// A Jupiter route captured from Jupiter's API (`tests/fixtures/jupiter_*.json`).
+pub struct Route {
+    pub accounts: Vec<AccountMeta>,
+    pub data: Vec<u8>,
+    pub in_amount: u64,
+    pub out_amount: u64,
+    pub block_time: i64,
+}
+
+pub const COMPUTE_BUDGET: Pubkey = Pubkey::from_str_const("ComputeBudget111111111111111111111111111111");
+pub const JUP_MINT: Pubkey = Pubkey::from_str_const("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN");
+
+pub fn compute_budget(units: u32) -> Instruction {
+    Instruction { program_id: COMPUTE_BUDGET, accounts: vec![], data: [vec![2u8], units.to_le_bytes().to_vec()].concat() }
+}
+
+/// A price from the snapshot's Jupiter price read: `spyx` (SPY's own price) or `jup`.
+pub fn snapshot_price(which: &str) -> f64 {
+    let v: serde_json::Value = serde_json::from_slice(&fs::read(fixture("jupiter_price.json")).unwrap()).unwrap();
+    match which {
+        "spyx" => v["spyx"]["stockData"]["price"].as_f64().unwrap(),
+        other => v[other]["usdPrice"].as_f64().unwrap(),
+    }
+}
+
+impl Env {
+    /// Loads a captured route: Jupiter and the AMM programs, and every account it reads except
+    /// the mints this world already holds (whose issuer key can mint).
+    pub fn load_route(&mut self, name: &str) -> Route {
+        let v: serde_json::Value = serde_json::from_slice(&fs::read(fixture(&format!("jupiter_{name}.json"))).unwrap()).unwrap();
+        for p in v["programs"].as_array().unwrap() {
+            let id: Pubkey = p.as_str().unwrap().parse().unwrap();
+            if id == TOKEN || id == TOKEN_2022 {
+                continue;
+            }
+            self.svm.add_program_from_file(id, fixture(&format!("prog_{id}.so"))).unwrap();
+        }
+        for (key, a) in v["accounts"].as_object().unwrap() {
+            let addr: Pubkey = key.parse().unwrap();
+            if self.svm.get_account(&addr).is_some_and(|a| a.lamports > 0) && [USDC, SPYX, QQQX, JUP_MINT].contains(&addr) {
+                continue;
+            }
+            let mut acc = Account {
+                lamports: a["lamports"].as_u64().unwrap(),
+                data: B64.decode(a["data"].as_str().unwrap()).unwrap(),
+                owner: a["owner"].as_str().unwrap().parse().unwrap(),
+                executable: false,
+                rent_epoch: 0,
+            };
+            if addr == JUP_MINT {
+                // This world's issuer mints the stand-in for AEQUA.
+                acc.data[0..4].copy_from_slice(&1u32.to_le_bytes());
+                acc.data[4..36].copy_from_slice(self.issuer.pubkey().as_ref());
+            }
+            self.svm.set_account(addr, acc).unwrap();
+        }
+        let ix = &v["swapInstruction"];
+        Route {
+            accounts: ix["accounts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| AccountMeta { pubkey: a["pubkey"].as_str().unwrap().parse().unwrap(), is_signer: false, is_writable: a["isWritable"].as_bool().unwrap() })
+                .collect(),
+            data: B64.decode(ix["data"].as_str().unwrap()).unwrap(),
+            in_amount: v["quote"]["inAmount"].as_str().unwrap().parse().unwrap(),
+            out_amount: v["quote"]["outAmount"].as_str().unwrap().parse().unwrap(),
+            block_time: v["blockTime"].as_i64().unwrap(),
+        }
+    }
+
+    /// Rewrites a program account in place.
+    pub fn edit<T: AccountDeserialize + anchor_lang::AccountSerialize>(&mut self, addr: &Pubkey, f: impl FnOnce(&mut T)) {
+        let mut acc = self.svm.get_account(addr).unwrap();
+        let mut v = T::try_deserialize(&mut acc.data.as_slice()).unwrap();
+        f(&mut v);
+        let mut data = Vec::new();
+        v.try_serialize(&mut data).unwrap();
+        acc.data[..data.len()].copy_from_slice(&data);
+        self.svm.set_account(*addr, acc).unwrap();
     }
 }
