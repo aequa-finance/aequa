@@ -1,2 +1,4 @@
+# Build output (cargo build-sbf, anchor idl build). scripts/idl.sh copies the IDL into the SDK.
 target/
+# The program address keypair: whoever holds it can deploy at the address until the deploy lands.
 keys/

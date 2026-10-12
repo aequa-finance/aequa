@@ -8,6 +8,9 @@ skip-lint = false
 [programs.localnet]
 aequa = "9xhUvFQy1yAnyuZTygfK1nD6naicXQoWMR6doxFxuTbL"
 
+[programs.mainnet]
+aequa = "9xhUvFQy1yAnyuZTygfK1nD6naicXQoWMR6doxFxuTbL"
+
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
