@@ -10,6 +10,9 @@ use crate::events::{HedgeReported, Landed};
 use crate::signer;
 use crate::state::{path, Config, HedgeReport, Reserve};
 
+/// How far HyperCore's clock may run ahead of Solana's.
+pub const REPORT_AHEAD_MS: i64 = 60_000;
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct ReportArgs {
     pub account_value: i64,
@@ -35,6 +38,11 @@ impl ReportHedge<'_> {
         let now = Clock::get()?.unix_timestamp;
         // Reports land in HyperCore's order; an older one never replaces a newer one.
         require!(args.hl_time > self.reserve.report.hl_time, AequaError::ReportOutOfOrder);
+        // HyperCore's time (ms) is at most a minute ahead of Solana's clock, and no older than
+        // the window a report counts for.
+        let now_ms = now.saturating_mul(1_000);
+        let window_ms = self.config.params.report_freshness_secs as i64 * 1_000;
+        require!(args.hl_time <= now_ms + REPORT_AHEAD_MS && now_ms - args.hl_time <= window_ms, AequaError::ReportTimeOutOfRange);
         // Markets past the listed collateral carry nothing.
         let count = self.config.collateral_count as usize;
         let mut short = args.short_notional;

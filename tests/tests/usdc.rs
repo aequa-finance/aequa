@@ -199,6 +199,14 @@ fn hedge_report_and_landing() {
     assert_eq!(r.report.reported_at, env.now());
     // An older report never replaces a newer one.
     assert_err(&env.report(report(now_ms - 1, 1)), "ReportOutOfOrder");
+    // HyperCore's time runs at most a minute ahead of Solana's clock: a time in the wrong unit
+    // (µs) or far ahead can't land and lock every later report out.
+    assert_err(&env.report(report(now_ms * 1_000, 1)), "ReportTimeOutOfRange");
+    assert_err(&env.report(report(now_ms + 61_000, 1)), "ReportTimeOutOfRange");
+    assert_ok(&env.report(report(now_ms + 59_000, 1)));
+    // Nor older than the window a report counts for.
+    env.warp(300);
+    assert_err(&env.report(report(now_ms + 60_000, 1)), "ReportTimeOutOfRange");
     // Only the reporter reports.
     let accounts = aequa::accounts::ReportHedge { config: env.p.config, reporter: env.keeper.pubkey(), reserve: env.p.reserve };
     let keeper = clone(&env.keeper);

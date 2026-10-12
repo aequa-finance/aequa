@@ -269,9 +269,11 @@ impl Config {
     /// The fee for a holder whose active stAEQUA is `active`.
     pub fn fee_bps(&self, active: u64) -> u16 {
         let p = &self.params;
+        // Thresholds are whole AEQUA; `active` is in base units.
+        let unit = 10u128.pow(self.aequa.decimals as u32);
         let mut fee = p.base_fee_bps;
         for i in 0..2 {
-            if p.tier_stake[i] > 0 && active >= p.tier_stake[i] {
+            if p.tier_stake[i] > 0 && active as u128 >= p.tier_stake[i] as u128 * unit {
                 fee = fee.min(p.tier_fee_bps[i]);
             }
         }

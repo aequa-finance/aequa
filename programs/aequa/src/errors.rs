@@ -100,4 +100,6 @@ pub enum AequaError {
     CollateralMismatch,
     #[msg("Arithmetic overflow")]
     MathOverflow,
+    #[msg("The report's HyperCore time is outside the accepted range")]
+    ReportTimeOutOfRange,
 }
