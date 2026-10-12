@@ -272,12 +272,12 @@ mod tests {
 
     #[test]
     fn reads_feeds_and_sessions() {
-        let ts = 1_791_212_400_000_000u64;
+        let ts = 1_791_471_600_000_000u64;
         let m = envelope(&payload(ts, 3, &[(1398, 66_512_340, -5, 0, ts), (1363, 59_001_000, -5, 3, ts - 100_000)]));
         let u = parse(&m).unwrap();
         assert_eq!(u.feeds.len(), 2);
-        u.require_fresh(1_791_212_405, 10).unwrap();
-        assert!(u.require_fresh(1_791_212_411, 10).is_err());
+        u.require_fresh(1_791_471_605, 10).unwrap();
+        assert!(u.require_fresh(1_791_471_611, 10).is_err());
         let p = u.price(1398, 10).unwrap();
         assert_eq!((p.price_e8, p.session), (66_512_340_000, 0));
         assert_eq!(u.price(1363, 10).unwrap().session, 3);
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn closed_and_carried_prices_are_not_live() {
-        let ts = 1_791_212_400_000_000u64;
+        let ts = 1_791_471_600_000_000u64;
         let m = envelope(&payload(ts, 3, &[(1398, 66_512_340, -5, 4, ts), (1363, 59_001_000, -5, 0, ts - 60_000_000)]));
         let u = parse(&m).unwrap();
         assert!(u.price(1398, 10).is_err(), "closed session");
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed() {
-        let ts = 1_791_212_400_000_000u64;
+        let ts = 1_791_471_600_000_000u64;
         let mut m = envelope(&payload(ts, 3, &[(1398, 1, -5, 0, ts)]));
         m.push(0);
         assert!(parse(&m).is_err(), "trailing byte");
@@ -303,6 +303,6 @@ mod tests {
         p[19] = 99; // first property id
         assert!(parse(&envelope(&p)).is_err(), "unknown property");
         let u = parse(&envelope(&payload(ts, 4, &[(1398, 1, -5, 0, ts)]))).unwrap();
-        assert!(u.require_fresh(1_791_212_400, 10).is_err(), "one-second channel");
+        assert!(u.require_fresh(1_791_471_600, 10).is_err(), "one-second channel");
     }
 }

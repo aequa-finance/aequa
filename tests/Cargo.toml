@@ -1,0 +1,21 @@
+[package]
+name = "aequa-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aequa = { path = "../programs/aequa", features = ["no-entrypoint"] }
+anchor-lang = { version = "=1.2.1", default-features = false, features = ["solana-v4"] }
+litesvm = { version = "0.17", features = ["precompiles"] }
+solana-keypair = "3"
+solana-signer = "3"
+solana-transaction = "4"
+solana-message = "4"
+solana-instruction = "3"
+solana-address = "2"
+solana-account = "4"
+solana-clock = "3"
+ed25519-dalek = "2"
+serde_json = "1"
+base64 = "0.22"

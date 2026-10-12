@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/aequa"]
+members = ["programs/aequa", "tests"]
 resolver = "2"
 
 [profile.release]
